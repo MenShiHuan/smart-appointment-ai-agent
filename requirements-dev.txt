@@ -1,0 +1,4 @@
+# Dev-only dependencies (not needed at runtime).
+# Install with: uv pip install -r requirements-dev.txt
+pytest>=8.0
+pytest-asyncio>=0.23

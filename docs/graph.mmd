@@ -1,0 +1,35 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	classify(classify)
+	appointment(appointment)
+	consultation(consultation)
+	memory(memory)
+	unsupported(unsupported)
+	replan(replan)
+	confirm(confirm)
+	manual_review(manual_review)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> classify;
+	confirm --> __end__;
+	consultation --> __end__;
+	manual_review --> __end__;
+	memory --> __end__;
+	unsupported --> __end__;
+	classify -.-> appointment;
+	classify -.-> consultation;
+	classify -.-> memory;
+	classify -.-> unsupported;
+	appointment -.-> replan;
+	appointment -.-> confirm;
+	appointment -.-> manual_review;
+	appointment -. &nbsp;end&nbsp; .-> __end__;
+	replan -. &nbsp;retry&nbsp; .-> appointment;
+	replan -. &nbsp;end&nbsp; .-> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc
