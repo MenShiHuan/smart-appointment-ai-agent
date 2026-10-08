@@ -10,6 +10,7 @@
 
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime, timedelta
+from config.time_config import time_config
 import logging
 
 
@@ -96,21 +97,22 @@ class PatternAnalyzer:
             preferences = self.analyze_user_preferences(user_id)
             if not preferences or preferences['total_appointments'] < 2:
                 return False
-            
+
             last_appointment = preferences['last_appointment_date']
             if not last_appointment:
                 return False
-            
-            # 确保是datetime对象
+
+            # 确保是datetime对象（DB 存储口径为 naive UTC，统一转北京时间再比较）
             if isinstance(last_appointment, str):
                 last_appointment = datetime.fromisoformat(last_appointment.replace('Z', '+00:00'))
-            
+            last_appointment = time_config.to_beijing(last_appointment)
+
             # 计算距离上次预约的天数
-            days_since_last = (datetime.now() - last_appointment).days
-            
+            days_since_last = (time_config.now() - last_appointment).days
+
             # 如果超过阈值天数，则需要发送提醒
             return days_since_last >= days_threshold
-            
+
         except Exception as e:
             self.logger.error(f"判断回访提醒失败: {str(e)}")
             return False
@@ -120,11 +122,11 @@ class PatternAnalyzer:
         try:
             preferences = self.analyze_user_preferences(user_id)
             if not preferences:
-                return "您好！好久没见了，要不要预约一个按摩放松一下？"
-            
-            # 获取技师信息
+                return "您好！好久没见了，要不要预约一次理疗放松一下？"
+
+            # 获取理疗师信息
             tech_id = preferences.get('favorite_technician_id')
-            service = preferences.get('favorite_service', '按摩')
+            service = preferences.get('favorite_service', '理疗服务')
             duration = preferences.get('favorite_duration', 60)
             
             # 构建个性化消息（通过 Services 层获取技师信息，遵守分层架构）
@@ -149,4 +151,4 @@ class PatternAnalyzer:
             
         except Exception as e:
             self.logger.error(f"生成回访消息失败: {str(e)}")
-            return "您好！好久没见了，要不要预约一个按摩放松一下？"
+            return "您好！好久没见了，要不要预约一次理疗放松一下？"

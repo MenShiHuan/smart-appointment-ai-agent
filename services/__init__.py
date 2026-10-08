@@ -13,8 +13,6 @@
 from .text_embedding import (
     embed_input,
     find_best_match_indices,
-    save_technician_embeddings,
-    load_technician_embeddings
 )
 from .knowledge_service import KnowledgeService
 from .technician_service import TechnicianService
@@ -25,8 +23,6 @@ from .recommendation_service import RecommendationService
 __all__ = [
     'embed_input',
     'find_best_match_indices',
-    'save_technician_embeddings',
-    'load_technician_embeddings',
     'KnowledgeService',
     'TechnicianService',
     'AppointmentService',

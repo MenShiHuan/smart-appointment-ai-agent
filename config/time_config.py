@@ -62,9 +62,21 @@ class TimeConfig:
         return dt.strftime(format_str)
     
     @classmethod
+    def utcnow(cls) -> datetime:
+        """当前 UTC 时间（naive，与 DB created_at 存储口径一致）"""
+        return datetime.now(timezone.utc).replace(tzinfo=None)
+
+    @classmethod
+    def to_beijing(cls, dt: datetime) -> datetime:
+        """把存储口径（naive UTC）的时间转换为北京时间"""
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(cls.BEIJING_TZ)
+
+    @classmethod
     def get_business_hours(cls) -> tuple:
-        """获取营业时间范围"""
-        return (12, 22)  # 12:00 - 22:00
+        """获取营业时间范围（与知识库种子口径一致：9:00-22:00）"""
+        return (9, 22)
     
     @classmethod
     def is_business_time(cls, dt: Optional[datetime] = None) -> bool:

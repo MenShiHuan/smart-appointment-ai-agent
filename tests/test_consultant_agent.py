@@ -1,119 +1,242 @@
 """
-ConsultantAgent 功能测试
+咨询 Agent 离线测试（C1 重写）
 
-测试咨询代理的实际功能：
-1. 识别咨询相关请求
-2. 从知识库检索相关信息
-3. 生成专业回答
-4. 处理无关请求（兜底）
+原 5 个用例依赖真实 LLM 与真实 embedding 服务（侥幸通过但慢且烧钱）。
+重写要点：
+- 生成/分类 LLM 经 monkeypatch create_chat_model 注入脚本化 FakeLLM
+- 检索器替换为返回固定知识条的假实现；另设一条用例用真实 KnowledgeService
+  + FakeEmbedding + 临时 SQLite 验证离线检索链路
+- 断言聚焦"知识进入提示词"与"逐 token 流式"等可离线验证的行为
 """
+import asyncio
 
 import pytest
+
 from agents.consultant_agent import ConsultantAgent
+from services.knowledge_service import KnowledgeService
+from tests.conftest import FakeLLM
 
 
-class TestConsultantAgentCoreFeatures:
-    """测试咨询代理核心功能"""
-    
-    @pytest.mark.asyncio
-    async def test_should_answer_massage_related_questions(self):
-        """测试：应该能回答按摩相关问题"""
-        agent = ConsultantAgent()
-        await agent.knowledge_retriever.initialize()
-        
-        massage_questions = [
-            "按摩有什么好处？",
-            "深层按摩是什么？", 
-            "按摩可以缓解疲劳吗？"
+DOCS = [
+    {
+        "content": "肩颈理疗可缓解颈椎疼痛与肩膀僵硬，促进局部血液循环。",
+        "category": "服务介绍",
+        "keywords": ["肩颈理疗", "颈椎", "缓解"],
+        "score": 0.92,
+        "rank": 1,
+    },
+    {
+        "content": "理疗后请注意保暖，避免受凉。",
+        "category": "注意事项",
+        "keywords": ["保暖", "受凉"],
+        "score": 0.81,
+        "rank": 2,
+    },
+]
+
+
+class FakeRetriever:
+    """返回固定知识条的检索器（隔离真实 embedding / FAISS）"""
+
+    def __init__(self, docs=DOCS):
+        self.docs = docs
+
+    async def initialize(self):
+        pass
+
+    async def search_knowledge(self, query, top_k=3):
+        return self.docs[:top_k]
+
+
+class NoopBehaviorAgent:
+    """no-op 行为记录：流式咨询结束会新建 UserBehaviorAgent 写入真实库，测试中隔离"""
+
+    def record_behavior(self, **kwargs):
+        return True
+
+
+def _make_agent(monkeypatch, llm, docs=DOCS, memory_entries=None):
+    """构造咨询 Agent：LLM 与检索器均注入假实现，行为记录 no-op，记忆召回可脚本化"""
+    monkeypatch.setattr("agents.consultant_agent.create_chat_model", lambda **kw: llm)
+    monkeypatch.setattr("agents.consultant_agent.KnowledgeRetriever", lambda: FakeRetriever(docs))
+    # _record_consultation_behavior 内部延迟导入，需 patch 其定义模块
+    monkeypatch.setattr("agents.user_behavior_agent.UserBehaviorAgent", lambda: NoopBehaviorAgent())
+
+    class ScriptedMemoryService:
+        def __init__(self):
+            self.entries = memory_entries or []
+
+        async def recall(self, user_id, query, top_k=None):
+            return self.entries
+
+    monkeypatch.setattr("services.memory_service.MemoryService", ScriptedMemoryService)
+    return ConsultantAgent()
+
+
+async def _collect(agen):
+    return [t async for t in agen]
+
+
+def test_consult_answers_with_retrieved_knowledge(monkeypatch):
+    """咨询回答：检索知识进入生成提示词，FakeLLM 内容原样返回"""
+    fake_llm = FakeLLM(["肩颈理疗每周1-2次有助于缓解疲劳。"])
+    agent = _make_agent(monkeypatch, fake_llm)
+
+    response = asyncio.run(agent.consult("肩颈理疗有什么好处？"))
+
+    assert response == "肩颈理疗每周1-2次有助于缓解疲劳。"
+    # 检索到的知识应进入生成提示词（RAG 接线验证）
+    messages = fake_llm.ainvoke_calls[-1]
+    prompt = messages[0]["content"]
+    assert "颈椎疼痛与肩膀僵硬" in prompt, "检索知识应注入生成提示词"
+    assert "肩颈理疗有什么好处？" in prompt, "用户问题应注入生成提示词"
+
+
+def test_consult_stream_classifies_then_chunks_answer(monkeypatch):
+    """流式咨询：先分类（YES），再逐 token 输出；结束重置状态"""
+    from agents.core.session import SessionContext
+    from config.constants import StateEnum
+
+    fake_llm = FakeLLM(["YES", "理疗可放松肌肉。"])
+    agent = _make_agent(monkeypatch, fake_llm)
+    ctx = SessionContext(session_id="s1")
+
+    tokens = asyncio.run(_collect(agent.consult_stream("理疗有什么用？", session=ctx)))
+
+    joined = "".join(tokens)
+    assert "理疗可放松肌肉。" in joined
+    assert any(t.startswith("[REPLY][咨询机器人]") for t in tokens)
+    assert fake_llm.astream_calls, "生成阶段应走流式调用"
+    assert ctx.state.value == StateEnum.CLASSIFY, "咨询结束应回分类状态"
+
+
+def test_consult_stream_unrelated_question_yields_redirect(monkeypatch):
+    """无关问题：分类器返回 NO → 输出转交提示，不进入检索生成"""
+    fake_llm = FakeLLM(["NO", "不应被调用"])
+    agent = _make_agent(monkeypatch, fake_llm)
+
+    tokens = asyncio.run(_collect(agent.consult_stream("今天天气怎么样？")))
+
+    joined = "".join(tokens)
+    assert "不是咨询类问题" in joined
+    assert not fake_llm.astream_calls, "无关问题不应进入 LLM 生成"
+
+
+def test_invalid_inputs_do_not_crash(monkeypatch):
+    """空/无效输入：不崩溃，产出字符串响应"""
+    fake_llm = FakeLLM(["NO"])
+    agent = _make_agent(monkeypatch, fake_llm)
+
+    for invalid in ["", "   ", "？", "###"]:
+        tokens = asyncio.run(_collect(agent.consult_stream(invalid)))
+        response = "".join(tokens)
+        assert isinstance(response, str)
+        assert len(response) > 0
+
+
+def test_retriever_searches_knowledge_offline(tmp_path, monkeypatch):
+    """检索链路离线验证：真实 KnowledgeService + 关键词感知假向量 + 临时库"""
+    class KeywordEmbedding:
+        def __call__(self, text):
+            return [1.0, 0.0] if "肩颈" in text else [0.0, 1.0]
+
+    monkeypatch.setattr("services.knowledge_service.embed_input", KeywordEmbedding())
+
+    service = KnowledgeService(db_path=f"sqlite:///{tmp_path}/c1_kb.db")
+    asyncio.run(service.initialize())
+
+    results = asyncio.run(service.search("肩颈理疗有什么好处？", top_k=3))
+
+    assert isinstance(results, list)
+    assert len(results) > 0, "初始化时应播种默认知识并可检索命中"
+    for doc in results:
+        assert "content" in doc
+        assert isinstance(doc["content"], str)
+        assert doc.get("score") is not None, "检索结果应带相似度分数"
+        assert 0 <= doc["score"] <= 1.0, "归一化后分数应为余弦相似度"
+
+
+def test_consult_with_empty_knowledge_still_answers(monkeypatch):
+    """知识库无命中：仍基于问题本身生成回答（检索结果为空不阻塞）"""
+    fake_llm = FakeLLM(["建议您到店咨询理疗师。"])
+    agent = _make_agent(monkeypatch, fake_llm, docs=[])
+
+    response = asyncio.run(agent.consult("有什么理疗项目？"))
+
+    assert response == "建议您到店咨询理疗师。"
+
+
+def test_consult_injects_recalled_memory_context(monkeypatch):
+    """C4b：记忆召回命中时，偏好条目注入生成提示词"""
+    fake_llm = FakeLLM(["结合您的偏好，建议肩颈理疗。"])
+    agent = _make_agent(monkeypatch, fake_llm, memory_entries=[
+        {"entry_type": "service", "content": "肩颈理疗"},
+        {"entry_type": "time_period", "content": "下午"},
+    ])
+
+    response = asyncio.run(agent.consult("最近肩颈不舒服，有什么建议？"))
+
+    assert response == "结合您的偏好，建议肩颈理疗。"
+    prompt = fake_llm.ainvoke_calls[-1][0]["content"]
+    assert "用户的历史偏好记忆" in prompt
+    assert "service=肩颈理疗" in prompt
+    assert "time_period=下午" in prompt
+
+
+def test_consult_without_memory_hits_has_no_memory_section(monkeypatch):
+    """C4b：召回为空时不注入记忆段（保持无记忆时的既有提示词结构）"""
+    fake_llm = FakeLLM(["建议您到店咨询。"])
+    agent = _make_agent(monkeypatch, fake_llm)  # 默认空召回
+
+    asyncio.run(agent.consult("有什么理疗项目？"))
+
+    prompt = fake_llm.ainvoke_calls[-1][0]["content"]
+    assert "用户的历史偏好记忆" not in prompt
+
+
+class FakeTechnicianService:
+    """技师表假实现：理疗师档案注入测试（E1 配套）"""
+
+    def get_all_technicians(self):
+        return [
+            {"name": "李娜", "gender": "女", "strength": "手法细腻，擅长舒缓放松类理疗"},
+            {"name": "张伟", "gender": "男", "strength": "擅长肩颈腰背理疗，手法力度大"},
         ]
-        
-        for question in massage_questions:
-            response = await agent.consult(question)
-            assert isinstance(response, str), f"应该返回字符串回答，但得到：{type(response)}"
-            assert len(response.strip()) > 0, f"回答不应该为空，问题：{question}"
-            
-            massage_keywords = ["按摩", "massage", "效果", "好处", "肌肉", "血液", "放松"]
-            has_relevant_content = any(keyword in response for keyword in massage_keywords)
-            assert has_relevant_content, f"回答应该与按摩相关，问题：{question}，回答：{response[:200]}..."
-    
-    @pytest.mark.asyncio
-    async def test_should_search_knowledge_from_database(self):
-        """测试：应该能从数据库检索相关知识"""
-        agent = ConsultantAgent()
-        await agent.knowledge_retriever.initialize()
-        
-        question = "按摩有什么好处？"
-        knowledge_results = await agent.knowledge_retriever.search_knowledge(question, top_k=3)
-        
-        assert isinstance(knowledge_results, list), f"应该返回列表，但得到：{type(knowledge_results)}"
-        
-        if len(knowledge_results) > 0:
-            for doc in knowledge_results:
-                assert isinstance(doc, dict), f"知识条目应该是字典格式，但得到：{type(doc)}"
-                assert 'content' in doc, f"知识条目应该有content字段，但得到：{doc.keys()}"
-                
-            all_content = " ".join(doc.get('content', '') for doc in knowledge_results)
-            massage_keywords = ["按摩", "massage", "效果", "好处", "肌肉"]
-            has_relevant = any(keyword in all_content for keyword in massage_keywords)
-            assert has_relevant, f"检索的知识应该与按摩相关，但得到：{all_content[:300]}..."
-    
-    @pytest.mark.asyncio
-    async def test_should_generate_professional_response(self):
-        """测试：应该生成专业的回答"""
-        agent = ConsultantAgent()
-        await agent.knowledge_retriever.initialize()
-        
-        question = "按摩对身体有什么作用？"
-        response = await agent.consult(question)
-        
-        assert len(response) > 50, f"专业回答应该有一定长度，但只有{len(response)}字符：{response}"
-        assert not response.startswith("抱歉"), f"对于按摩相关问题不应该道歉开头：{response[:100]}..."
-        assert "不知道" not in response, f"专业回答不应该说不知道：{response[:100]}..."
-        
-        professional_terms = ["血液循环", "肌肉", "疲劳", "放松", "促进", "缓解"]
-        has_professional_content = any(term in response for term in professional_terms)
-        assert has_professional_content, f"回答应该包含专业词汇，但得到：{response[:200]}..."
 
 
-class TestConsultantAgentEdgeCases:
-    """测试边界情况和错误处理"""
-    
-    @pytest.mark.asyncio
-    async def test_should_handle_empty_or_invalid_input(self):
-        """测试：应该处理空输入或无效输入"""
-        agent = ConsultantAgent()
-        await agent.knowledge_retriever.initialize()
-        
-        invalid_inputs = ["", "   ", "？", "...", "###"]
-        
-        for invalid_input in invalid_inputs:
-            try:
-                response = await agent.consult(invalid_input)
-                assert isinstance(response, str), f"无效输入应该返回字符串，输入：'{invalid_input}'"
-            except Exception as e:
-                assert isinstance(e, (ValueError, TypeError)), \
-                    f"无效输入'{invalid_input}'异常类型错误：{type(e)}"
-    
-    @pytest.mark.asyncio
-    async def test_should_work_with_stream_mode(self):
-        """测试：流式模式应该正常工作"""
-        agent = ConsultantAgent()
-        await agent.knowledge_retriever.initialize()
-        
-        question = "按摩的主要好处是什么？"
-        
-        response_tokens = []
-        async for token in agent.consult_stream(question):
-            response_tokens.append(token)
-        
-        stream_response = "".join(response_tokens)
-        assert len(stream_response) > 0, "流式模式应该返回内容"
-        
-        normal_response = await agent.consult(question)
-        
-        massage_keywords = ["按摩", "好处", "效果", "肌肉", "血液"]
-        stream_has_content = any(keyword in stream_response for keyword in massage_keywords)
-        normal_has_content = any(keyword in normal_response for keyword in massage_keywords)
-        
-        assert stream_has_content or normal_has_content, \
-            f"至少一种模式应该返回相关内容\n流式：{stream_response[:100]}...\n普通：{normal_response[:100]}..."
+def test_consult_injects_therapist_profiles_for_therapist_question(monkeypatch):
+    """E1 配套：问题涉及理疗师时，技师表档案注入提示词（单一事实源）"""
+    fake_llm = FakeLLM(["李娜理疗师擅长舒缓放松类理疗。"])
+    monkeypatch.setattr("services.technician_service.TechnicianService", FakeTechnicianService)
+    agent = _make_agent(monkeypatch, fake_llm)
+
+    response = asyncio.run(agent.consult("李娜理疗师擅长什么项目？"))
+
+    assert response == "李娜理疗师擅长舒缓放松类理疗。"
+    prompt = fake_llm.ainvoke_calls[-1][0]["content"]
+    assert "本店理疗师信息" in prompt
+    assert "李娜" in prompt and "舒缓放松类理疗" in prompt
+
+
+def test_consult_skips_therapist_profiles_for_unrelated_question(monkeypatch):
+    """E1 配套：与理疗师无关的问题不注入技师表档案（省 Token）"""
+    fake_llm = FakeLLM(["营业时间是9点到22点。"])
+    monkeypatch.setattr("services.technician_service.TechnicianService", FakeTechnicianService)
+    agent = _make_agent(monkeypatch, fake_llm)
+
+    asyncio.run(agent.consult("你们几点开门？"))
+
+    prompt = fake_llm.ainvoke_calls[-1][0]["content"]
+    assert "本店理疗师信息" not in prompt
+
+
+def test_system_prompt_contains_medical_compliance_boundary(monkeypatch):
+    """E1 配套：医疗诊断/疗效承诺类问题不做诊断、转医师（合规约束落地）"""
+    fake_llm = FakeLLM(["建议您先咨询医师。"])
+    agent = _make_agent(monkeypatch, fake_llm)
+
+    asyncio.run(agent.consult("颈椎病做理疗能根治吗？"))
+
+    prompt = fake_llm.ainvoke_calls[-1][0]["content"]
+    assert "不做诊断" in prompt
+    assert "咨询专业医师" in prompt

@@ -35,7 +35,7 @@ class ConversationRepository:
             query = (
                 session.query(ConversationMessage)
                 .filter(ConversationMessage.session_id == session_id)
-                .order_by(ConversationMessage.id)
+                .order_by(ConversationMessage.created_at, ConversationMessage.id)
             )
             if limit is not None:
                 query = query.limit(limit)

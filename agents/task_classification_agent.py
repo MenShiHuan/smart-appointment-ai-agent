@@ -35,7 +35,7 @@ class TaskClassificationAgent:
         # 全局单例组件（无会话状态）
         self.task_classifier = TaskClassifier(self.llm)
         self.session_registry = SessionRegistry()
-        self.business_context = "推拿服务"
+        self.business_context = "健康理疗服务"
 
         # 设置回调函数
         self._setup_callbacks()
@@ -121,6 +121,6 @@ class TaskClassificationAgent:
         session.state.value = StateEnum.CLASSIFY
         session.unrelated_reply_index = 0
 
-    def set_business_context(self, service_name: str = "推拿服务"):
+    def set_business_context(self, service_name: str = "健康理疗服务"):
         """设置业务上下文"""
         self.business_context = service_name

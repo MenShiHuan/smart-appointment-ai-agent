@@ -288,7 +288,7 @@
             <!-- 用户分析数据 -->
             <div class="stats-grid" id="analysisData">
                 <div class="stat-card">
-                    <div class="stat-title">最喜欢的技师</div>
+                    <div class="stat-title">最喜欢的理疗师</div>
                     <div id="favoriteTechnician" class="stat-value primary">正在加载...</div>
                 </div>
                 <div class="stat-card">
@@ -361,8 +361,8 @@
             try {
                 console.log('开始加载用户分析数据...');
                 
-                // 使用与服务器一致的地址和端口
-                const apiUrl = 'http://127.0.0.1:8000/api/user-behavior/analysis';
+                // 使用相对路径，与页面同源，避免端口不一致
+                const apiUrl = '/api/user-behavior/analysis';
                 console.log('调用API:', apiUrl);
                 
                 const response = await fetch(apiUrl, {
@@ -438,7 +438,7 @@
                 button.disabled = true;
                 button.classList.add('loading');
                 
-                const response = await fetch('http://127.0.0.1:8000/api/user-behavior/send-reminder', {
+                const response = await fetch('/api/user-behavior/send-reminder', {
                     method: 'POST',
                     headers: {
                         'Accept': 'application/json',
@@ -466,7 +466,7 @@
                 if (data.technician_available_times && data.technician_available_times.length > 0) {
                     availableTimes.innerHTML = `
                         <strong>建议预约时间：</strong><br>
-                        ${data.technician_available_times.map(time => `<span style="background: #f093fb; color: white; padding: 4px 8px; border-radius: 8px; margin: 2px; display: inline-block;">${time}</span>`).join('')}
+                        ${data.technician_available_times.map(time => `<span style="background: #f093fb; color: white; padding: 4px 8px; border-radius: 8px; margin: 2px; display: inline-block;">${typeof time === 'object' ? (time.formatted || '') : time}</span>`).join('')}
                     `;
                 } else {
                     availableTimes.innerHTML = '';

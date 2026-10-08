@@ -4,19 +4,18 @@
 负责协调整个预约流程
 """
 
-from typing import Dict, Any, AsyncGenerator
+from typing import Dict, Any, AsyncGenerator, Optional
 from .input_parser import InputParser
 from .technician_finder import TechnicianFinder
 from .message_builder import MessageBuilder
 from .appointment_database import AppointmentDatabase
 from .weather_tool import WeatherTool
 from config.domain_terms import CONTRAINDICATION_TERMS
-from langchain.agents import AgentExecutor, create_openai_tools_agent
-from langchain_core.prompts import ChatPromptTemplate
 
 # 确认/取消回复的关键词（B4 落库前确认 + 技师推荐确认共用）
 POSITIVE_RESPONSES = ['是', '好', '可以', '同意', '确定', '确认', 'yes', 'ok', '行', '没问题']
-NEGATIVE_RESPONSES = ['不', '不要', '不行', '不同意', '取消', '换', 'no', '算了']
+# "改/换一位/另约"表示变更意图（推荐确认语境下=拒绝原推荐）
+NEGATIVE_RESPONSES = ['不', '不要', '不行', '不同意', '取消', '换', '改', '换一位', '另约', 'no', '算了']
 
 
 class AppointmentProcessor:
@@ -33,74 +32,63 @@ class AppointmentProcessor:
         self.emit_replan_signal = False
         # 图编排模式下开启：落库前确认/禁忌转人工信号（由 confirm/manual_review 节点处理）
         self.emit_confirm_signal = False
-        
-        # 初始化天气工具和 agent
-        if self.llm:
-            self.weather_tool = WeatherTool()
-            self.tools = [self.weather_tool]
-            
-            # 创建 agent prompt
-            self.agent_prompt = ChatPromptTemplate.from_messages([
-                ("system", "你是一个智能助手，可以获取天气信息并生成个性化的预约成功提示。"),
-                ("human", "{input}"),
-                ("placeholder", "{agent_scratchpad}"),
-            ])
-            
-            # 创建 agent
-            self.weather_agent = create_openai_tools_agent(self.llm, self.tools, self.agent_prompt)
-            self.agent_executor = AgentExecutor(agent=self.weather_agent, tools=self.tools, verbose=True)
+
+        # 天气工具（门店城市配置化后直接调用，不经过 ReAct agent，避免英文/追问泄漏）
+        self.weather_tool = WeatherTool()
     
     def update_history_from_data(self, appointment_history: Dict[str, Any], data: Dict[str, Any],
                                  user_input: str = None) -> bool:
-        """从解析数据更新预约历史"""
+        """从解析数据更新预约历史
+
+        必填槽位：时间 + 项目（config/domain_terms.REQUIRED_SLOT_FIELDS）；
+        时长/性别/指定理疗师/偏好均为选填，时长缺省按项目标准时长补齐。
+        """
         # B4：等待落库确认时，处理确认/取消/禁忌筛查回复
         if appointment_history.get('awaiting_booking_confirmation'):
             return self._handle_booking_confirmation(appointment_history, user_input or "", data)
 
         # 检查是否在等待用户确认推荐技师
         if appointment_history.get('awaiting_confirmation'):
-            return self._handle_recommendation_response(appointment_history, data)
-        
+            return self._handle_recommendation_response(appointment_history, data, user_input)
+
         # 只更新有值的字段，避免覆盖之前的信息
         for key in ["duration", "gender", "start_time", "project", "technician_name"]:
             if data.get(key) and data[key] != "未知":
                 appointment_history[key] = data[key]
-        
+
         # preference特殊处理
         if data.get("preference") and data["preference"] != "未知":
             appointment_history["preference"] = data["preference"]
-        
-        # 检查是否收集齐所有必需信息
-        # 必需信息：时间、项目、时长
-        # 如果指定了技师名，则不需要性别；否则性别也是必需的
-        required_fields = ["start_time", "project", "duration"]
-        technician_name = appointment_history.get("technician_name")
-        
-        if not technician_name or technician_name == "未知":
-            # 没有指定技师，需要性别来筛选
-            required_fields.append("gender")
-        
+
+        # 必填信息判定：时间 + 项目
+        from config.domain_terms import REQUIRED_SLOT_FIELDS, PROJECT_DEFAULT_DURATIONS, DEFAULT_DURATION_MINUTES
         has_all_required = all(
-            appointment_history.get(field) and appointment_history[field] != "未知" 
-            for field in required_fields
+            appointment_history.get(field) and appointment_history[field] != "未知"
+            for field in REQUIRED_SLOT_FIELDS
         )
-        
-        # 如果信息完整，但是指定的技师不可用且需要推荐，则不认为预约"完成"
-        if has_all_required and technician_name and technician_name != "未知":
-            # 检查指定技师是否可用，如果不可用则进入推荐流程
-            # 这个检查留到 handle_complete_appointment 中进行
-            pass
-        
+
+        # 时长选填：信息齐全且用户未提时长时，按项目标准时长补齐
+        if has_all_required and not appointment_history.get("duration"):
+            project = appointment_history.get("project", "")
+            appointment_history["duration"] = (
+                f"{PROJECT_DEFAULT_DURATIONS.get(project, DEFAULT_DURATION_MINUTES)}分钟")
+
         return has_all_required
 
-    def _handle_recommendation_response(self, appointment_history: Dict[str, Any], data: Dict[str, Any]) -> bool:
+    def _handle_recommendation_response(self, appointment_history: Dict[str, Any],
+                                        data: Dict[str, Any],
+                                        user_input: Optional[str] = None) -> bool:
         """处理用户对推荐技师的回应"""
-        user_response = data.get('confirmation', '').lower()
+        user_response = (data.get('confirmation') or '').lower()
+        # 兜底：confirmation 未被抽取（未知/空）时，用用户原文做肯定/否定关键词判定，
+        # 覆盖"我不换别人，那我改到后天下午三点吧"这类含否定/变更意图的回复
+        if not user_response or user_response == "未知":
+            user_response = (user_input or '').lower()
 
         # 判断用户是否同意推荐
         is_positive = any(pos in user_response for pos in POSITIVE_RESPONSES)
         is_negative = any(neg in user_response for neg in NEGATIVE_RESPONSES)
-        
+
         if is_positive and not is_negative:
             # 用户同意推荐，更新技师信息
             recommended_tech = appointment_history.get('recommended_technician')
@@ -110,10 +98,23 @@ class AppointmentProcessor:
                 return True  # 表示可以进行预约
         elif is_negative:
             # 用户拒绝推荐
-            appointment_history['recommendation_declined'] = True
             appointment_history['awaiting_confirmation'] = False
+
+            # 拒绝时同句给出新选择（换技师/改时间等）：合并新槽位并清理推荐状态，
+            # 继续走正常匹配链路（e2e-002/003 场景）
+            new_slots = {k: data[k] for k in
+                         ("duration", "gender", "start_time", "project", "technician_name", "preference")
+                         if data.get(k) and data[k] != "未知"}
+            if new_slots:
+                appointment_history.pop('recommended_technician', None)
+                appointment_history.pop('original_technician', None)
+                appointment_history.update(new_slots)
+                return True
+
+            # 纯拒绝（无新选择）：走拒绝话术分支
+            appointment_history['recommendation_declined'] = True
             return True  # 表示需要处理拒绝情况
-        
+
         # 用户回应不明确，继续等待
         # 这里返回 False，表示信息还不完整，需要继续等待用户输入
         return False
@@ -283,11 +284,11 @@ class AppointmentProcessor:
                 reply = self.message_builder.create_appointment_failure_message(technician_name)
                 yield f"[REPLY][预约机器人]{reply}"
     
-    async def _process_successful_appointment(self, tech: Dict[str, Any], 
+    async def _process_successful_appointment(self, tech: Dict[str, Any],
                                            appointment_history: Dict[str, Any], session_id: str) -> str:
-        """处理预约成功的情况，并结合北京天气生成温馨提示"""
+        """处理预约成功的情况，并结合当地天气生成温馨提示（理疗后保暖/防晒建议）"""
         start_time, end_time, duration_min = self.technician_finder.parse_time_and_duration(
-            appointment_history["start_time"], 
+            appointment_history["start_time"],
             appointment_history["duration"]
         )
         # 保存预约到数据库
@@ -295,42 +296,44 @@ class AppointmentProcessor:
             tech["id"], start_time, end_time, appointment_history, session_id
         )
         if success:
-            # 更新内存中的忙碌时段
-            self.appointment_database.update_memory_schedule(tech["id"], start_time, end_time)
-            # 使用 LLM agent 生成结合北京天气的温馨提示
-            if self.llm and hasattr(self, 'agent_executor'):
-                prompt = f"请获取北京今天的天气信息，然后结合天气情况为用户生成一段温馨的预约成功提示。技师姓名：{tech['name']}，性别：{tech['gender']}。请根据天气给出合适的建议和关怀。"
+            # 天气温馨提示：门店城市配置化（config/domain_terms.STORE_CITY），
+            # 工具直调 + 单次 LLM 生成，输出约束为中文、不追问、不泄漏英文
+            if self.llm and self.weather_tool:
                 try:
-                    result = await self.agent_executor.ainvoke({"input": prompt})
-                    agent_output = result.get("output", "")
-                    return f"\n机器人：已为您预约技师：{tech['name']}，性别：{tech['gender']}。预约成功！\n{agent_output}\n"
+                    from config.domain_terms import STORE_CITY
+                    weather_text = await self.weather_tool._arun(STORE_CITY or "")
+                    compose_prompt = (
+                        f"请根据以下天气信息，为预约成功的用户写一句中文温馨提示"
+                        f"（理疗后保暖/防晒等建议，40字以内）。\n"
+                        f"要求：只输出中文建议本身，不要提问、不要使用英文、不要重复天气数据。\n"
+                        f"天气信息：{weather_text}\n"
+                        f"理疗师：{tech['name']}（{tech['gender']}）")
+                    response = await self.llm.ainvoke(
+                        [{"role": "user", "content": compose_prompt}])
+                    tip = (response.content if hasattr(response, "content")
+                           else str(response)).strip()
+                    if tip:
+                        return (f"\n机器人：已为您预约理疗师：{tech['name']}，"
+                                f"性别：{tech['gender']}。预约成功！\n{tip}\n")
                 except Exception as e:
-                    print(f"Agent调用失败: {e}")
-                    return self.message_builder.create_appointment_success_message(tech)
-            else:
-                return self.message_builder.create_appointment_success_message(tech)
+                    print(f"天气温馨提示生成失败，使用默认话术: {e}")
+            return self.message_builder.create_appointment_success_message(tech)
         else:
             return self.message_builder.create_save_failure_message()
     
     async def handle_incomplete_info(self, data: Dict[str, Any], appointment_history: Dict[str, Any]) -> AsyncGenerator[str, None]:
-        """处理信息不完整的情况"""
-        # 确定缺失的信息
-        missing = []
-        technician_name = appointment_history.get("technician_name")
-        
-        # 基本必需信息
-        if not appointment_history.get("start_time") or appointment_history.get("start_time") == "未知":
-            missing.append("start_time")
-        if not appointment_history.get("project") or appointment_history.get("project") == "未知":
-            missing.append("project")
-        if not appointment_history.get("duration") or appointment_history.get("duration") == "未知":
-            missing.append("duration")
-        
-        # 如果没有指定技师名，则需要性别
-        if not technician_name or technician_name == "未知":
-            if not appointment_history.get("gender") or appointment_history.get("gender") == "未知":
-                missing.append("gender")
-        
+        """处理信息不完整的情况（必填槽位：时间 + 项目）"""
+        from config.domain_terms import REQUIRED_SLOT_FIELDS
+        missing = [
+            field for field in REQUIRED_SLOT_FIELDS
+            if not appointment_history.get(field) or appointment_history.get(field) == "未知"
+        ]
+
+        # 兜底：槽位齐全却走到这里（异常路径），转重新确认而非输出"缺少："空话
+        if not missing:
+            yield f"[REPLY][预约机器人]{self.message_builder.create_reconfirm_message()}"
+            return
+
         reply = self.message_builder.create_missing_info_questions(missing)
         yield f"[THOUGHT][预约机器人]用户的预约信息不完整，缺少：{', '.join(missing)}，我需要询问用户补充这些信息"
         yield f"[REPLY][预约机器人]{reply}"

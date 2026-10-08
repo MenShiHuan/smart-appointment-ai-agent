@@ -45,7 +45,7 @@ def make_classify_node(task_agent):
         thought = THOUGHTS.get(category, "")
         if thought:
             get_stream_writer()(thought)
-        return {"category": category}
+        return {"category": category, "session_state": session.state.value}
     return classify_node
 
 
@@ -80,17 +80,22 @@ def make_appointment_node(task_agent):
             reply.append(token)
             writer(token)
 
+        # C12：槽位与状态机随 checkpointer 持久化（重启后恢复会话）
+        session_snapshot = {
+            "appointment_history": session.appointment_history,
+            "session_state": session.state.value,
+        }
         if manual_review_signal:
-            return {"reply": reply, "needs_manual_review": True}
+            return {"reply": reply, "needs_manual_review": True, **session_snapshot}
         if confirmation_signal:
-            return {"reply": reply, "needs_confirmation": True}
+            return {"reply": reply, "needs_confirmation": True, **session_snapshot}
         if replan_signal:
             if state.get("loop_count", 0) >= MAX_REPLAN_ROUNDS:
                 # 已达重规划上限：熔断降级
                 writer(BREAKER_MESSAGE)
-                return {"reply": reply, "needs_replan": False}
-            return {"reply": reply, "needs_replan": True}
-        return {"reply": reply, "needs_replan": False}
+                return {"reply": reply, "needs_replan": False, **session_snapshot}
+            return {"reply": reply, "needs_replan": True, **session_snapshot}
+        return {"reply": reply, "needs_replan": False, **session_snapshot}
     return appointment_node
 
 
@@ -105,7 +110,7 @@ def make_consultation_node(task_agent):
             async for token in agent.consult_stream(state["user_input"], session=session):
                 reply.append(token)
                 writer(token)
-        return {"reply": reply}
+        return {"reply": reply, "session_state": session.state.value}
     return consultation_node
 
 
@@ -122,7 +127,7 @@ def make_memory_node(task_agent):
             reply.append(token)
             writer(token)
         session.state.value = StateEnum.CLASSIFY
-        return {"reply": reply}
+        return {"reply": reply, "session_state": session.state.value}
     return memory_node
 
 
@@ -175,7 +180,7 @@ def make_confirm_node(task_agent):
             tech or {}, session.appointment_history
         )
         writer(f"[REPLY][预约机器人]{message}")
-        return {}
+        return {"session_state": session.state.value}
     return confirm_node
 
 
@@ -190,15 +195,19 @@ def make_manual_review_node(task_agent):
         # 转人工：清空预约槽位并重置状态机
         session.appointment_history = new_appointment_history()
         session.state.value = StateEnum.CLASSIFY
-        return {}
+        return {
+            "appointment_history": session.appointment_history,
+            "session_state": session.state.value,
+        }
     return manual_review_node
 
 
 def make_unsupported_node(task_agent):
     """兜底节点：不支持的任务类型"""
     async def unsupported_node(state: AgentGraphState, config) -> dict:
-        reply_text = "暂不支持该类型任务。请只询问和理疗、预约相关的问题。"
-        tokens = ["[REPLY][归类机器人]"] + list(reply_text)
+        # 与 agent_router 兜底话术保持一致（评测集关键词：暂不支持 + 健康理疗）
+        reply_text = "暂不支持该类型任务。请只询问和健康理疗、预约相关的问题。"
+        tokens = ["[REPLY][归类机器人]", reply_text]
         writer = get_stream_writer()
         for token in tokens:
             writer(token)

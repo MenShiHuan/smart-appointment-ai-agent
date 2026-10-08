@@ -1,0 +1,274 @@
+[
+  {
+    "id": "e2e-001",
+    "scenario": "完整预约成功",
+    "turns": [
+      {
+        "user_input": "我想预约明天下午2点的肩颈理疗",
+        "expect": {
+          "reply_contains": [
+            "请您确认预约信息"
+          ]
+        }
+      },
+      {
+        "user_input": "确认",
+        "expect": {
+          "reply_contains": [
+            "预约成功"
+          ],
+          "appointment_saved": true
+        }
+      }
+    ],
+    "note": "补槽 → 摘要确认 → 落库全链路"
+  },
+  {
+    "id": "e2e-002",
+    "scenario": "指定理疗师档期冲突推荐替代理疗师并接受",
+    "turns": [
+      {
+        "user_input": "帮我预约明天下午三点找张伟理疗师做艾灸",
+        "expect": {
+          "reply_contains": [
+            "张伟"
+          ],
+          "reply_not_contains": [
+            "请选择其他时间"
+          ]
+        }
+      },
+      {
+        "user_input": "那换成李娜老师吧",
+        "expect": {
+          "reply_contains": [
+            "请您确认预约信息"
+          ]
+        }
+      },
+      {
+        "user_input": "好的确认",
+        "expect": {
+          "reply_contains": [
+            "预约成功"
+          ],
+          "appointment_saved": true
+        }
+      }
+    ],
+    "note": "冲突 → 推荐替换 → 接受 → 落库"
+  },
+  {
+    "id": "e2e-003",
+    "scenario": "冲突后拒绝推荐改约时间",
+    "turns": [
+      {
+        "user_input": "明天下午三点找张伟老师做腰部理疗",
+        "expect": {
+          "reply_contains": [
+            "张伟"
+          ],
+          "reply_not_contains": [
+            "请选择其他时间"
+          ]
+        }
+      },
+      {
+        "user_input": "我不换别人，那我改到后天下午三点吧",
+        "expect": {
+          "reply_contains": [
+            "请您确认预约信息"
+          ]
+        }
+      },
+      {
+        "user_input": "确认",
+        "expect": {
+          "reply_contains": [
+            "预约成功"
+          ],
+          "appointment_saved": true
+        }
+      }
+    ],
+    "note": "冲突 → 拒绝推荐 → 改时间 → 落库"
+  },
+  {
+    "id": "e2e-004",
+    "scenario": "禁忌命中转人工不落库",
+    "turns": [
+      {
+        "user_input": "预约明天下午2点肩颈理疗一小时，女理疗师",
+        "expect": {
+          "reply_contains": [
+            "请您确认预约信息"
+          ]
+        }
+      },
+      {
+        "user_input": "好的确认，对了我有高血压",
+        "expect": {
+          "reply_contains": [
+            "咨询医师"
+          ],
+          "appointment_saved": false
+        }
+      }
+    ],
+    "note": "确认时披露禁忌 → 转人工，槽位重置不落库"
+  },
+  {
+    "id": "e2e-005",
+    "scenario": "无关问题标准拒绝话术",
+    "turns": [
+      {
+        "user_input": "今天天气怎么样，顺便帮我预测下明天的股票",
+        "expect": {
+          "reply_contains": [
+            "健康理疗",
+            "暂不支持"
+          ]
+        }
+      }
+    ],
+    "note": "无关聊天直接被健康顾问话术拦截"
+  },
+  {
+    "id": "e2e-006",
+    "scenario": "咨询问答营业时间",
+    "turns": [
+      {
+        "user_input": "请问你们店平时几点开门营业，晚上几点关门？",
+        "expect": {
+          "reply_contains": [
+            "9点",
+            "10点"
+          ]
+        }
+      }
+    ],
+    "note": "直接回答营业时间点"
+  },
+  {
+    "id": "e2e-007",
+    "scenario": "记忆查询(有画像)",
+    "turns": [
+      {
+        "user_input": "我想预约明天下午两点找李娜老师做足部理疗",
+        "expect": {
+          "reply_contains": [
+            "请您确认预约信息"
+          ]
+        }
+      },
+      {
+        "user_input": "确认预约",
+        "expect": {
+          "reply_contains": [
+            "预约成功"
+          ],
+          "appointment_saved": true
+        }
+      },
+      {
+        "user_input": "对了，我上次约的谁来着？",
+        "expect": {
+          "reply_contains": [
+            "李娜"
+          ]
+        }
+      }
+    ],
+    "note": "下单后查询历史记忆验证理疗师姓名"
+  },
+  {
+    "id": "e2e-008",
+    "scenario": "记忆查询(新用户)",
+    "turns": [
+      {
+        "user_input": "我以前常做什么项目来着？",
+        "expect": {
+          "reply_contains": [
+            "还没有",
+            "暂无预约记录"
+          ]
+        }
+      }
+    ],
+    "note": "新用户无历史记忆引导"
+  },
+  {
+    "id": "e2e-009",
+    "scenario": "多轮中途改需求项目覆盖",
+    "turns": [
+      {
+        "user_input": "我想约肩颈理疗",
+        "expect": {
+          "reply_contains": [
+            "时间"
+          ]
+        }
+      },
+      {
+        "user_input": "明天下午三点吧，还是做艾灸吧",
+        "expect": {
+          "reply_contains": [
+            "请您确认预约信息",
+            "艾灸"
+          ]
+        }
+      },
+      {
+        "user_input": "确认",
+        "expect": {
+          "reply_contains": [
+            "预约成功"
+          ],
+          "appointment_saved": true
+        }
+      }
+    ],
+    "note": "中途改项目 → 槽位动态覆盖"
+  },
+  {
+    "id": "e2e-010",
+    "scenario": "预约中途穿插无关问题槽位保留",
+    "turns": [
+      {
+        "user_input": "帮我约明天下午两点",
+        "expect": {
+          "reply_contains": [
+            "服务项目"
+          ]
+        }
+      },
+      {
+        "user_input": "今天天气怎么样",
+        "expect": {
+          "reply_contains": [
+            "健康理疗",
+            "暂不支持"
+          ]
+        }
+      },
+      {
+        "user_input": "肩颈理疗",
+        "expect": {
+          "reply_contains": [
+            "请您确认预约信息"
+          ]
+        }
+      },
+      {
+        "user_input": "确认",
+        "expect": {
+          "reply_contains": [
+            "预约成功"
+          ],
+          "appointment_saved": true
+        }
+      }
+    ],
+    "note": "插话无关后槽位保留并顺利完成预约"
+  }
+]

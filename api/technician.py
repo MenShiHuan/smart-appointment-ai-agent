@@ -11,6 +11,18 @@ from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/technicians", tags=["技师管理"])
 
+# 技师种子初始化：进程内只执行一次（含种子档案迁移检查），避免每请求重复建查
+_technicians_initialized = False
+
+
+def _ensure_technicians():
+    global _technicians_initialized
+    if _technicians_initialized:
+        return
+    from services.technician_service import TechnicianService
+    TechnicianService().initialize_default_technicians()
+    _technicians_initialized = True
+
 
 class TechnicianResponse(BaseModel):
     """技师信息响应"""
@@ -36,7 +48,7 @@ async def get_all_technicians():
     try:
         from services.technician_service import TechnicianService
         technician_service = TechnicianService()
-        technician_service.initialize_default_technicians()
+        _ensure_technicians()
         technicians = technician_service.get_all_technicians()
         
         return [
@@ -60,8 +72,8 @@ async def get_technician_schedule(technician_id: int):
         from config.time_config import time_config
         
         technician_service = TechnicianService()
-        technician_service.initialize_default_technicians()
-        
+        _ensure_technicians()
+
         # 获取技师信息确认存在
         tech = technician_service.get_technician_by_id(technician_id)
         if not tech:
@@ -75,8 +87,8 @@ async def get_technician_schedule(technician_id: int):
             ScheduleResponse(
                 id=sched["id"],
                 technician_id=sched["technician_id"],
-                start_time=sched["start_time"].strftime("%H:%M"),
-                end_time=sched["end_time"].strftime("%H:%M"),
+                start_time=sched["start_time"].strftime("%H:%M") if hasattr(sched["start_time"], 'strftime') else str(sched["start_time"]),
+                end_time=sched["end_time"].strftime("%H:%M") if hasattr(sched["end_time"], 'strftime') else str(sched["end_time"]),
                 status=sched["status"],
                 appointment_id=sched.get("appointment_id")
             )
@@ -95,7 +107,7 @@ async def get_technician(technician_id: int):
         from services.technician_service import TechnicianService
         
         technician_service = TechnicianService()
-        technician_service.initialize_default_technicians()
+        _ensure_technicians()
         tech = technician_service.get_technician_by_id(technician_id)
         
         if not tech:
@@ -121,8 +133,8 @@ async def get_all_technicians_schedule_today():
         from config.time_config import time_config
         
         technician_service = TechnicianService()
-        technician_service.initialize_default_technicians()
-        
+        _ensure_technicians()
+
         # 获取所有技师
         all_technicians = technician_service.get_all_technicians()
         today = time_config.today()

@@ -466,7 +466,7 @@
     <div class="container">
         <div class="header">
             <h2><i class="fas fa-brain"></i> 知识库管理系统</h2>
-            <p>管理推拿房知识库，测试智能检索功能</p>
+            <p>管理健康理疗知识库，测试智能检索功能</p>
         </div>
         
         <div class="content">
@@ -500,7 +500,7 @@
                 <h3>🔍 智能搜索测试</h3>
                 <div class="form-group">
                     <label for="searchQuery">搜索查询：</label>
-                    <input type="text" id="searchQuery" class="form-control" placeholder="输入搜索内容，如：营业时间、价格、技师等">
+                    <input type="text" id="searchQuery" class="form-control" placeholder="输入搜索内容，如：营业时间、价格、理疗师等">
                 </div>
                 <div style="display: flex; gap: 15px;">
                     <div class="form-group" style="flex: 1;">
@@ -583,6 +583,13 @@
     </div>
     
     <script>
+        // HTML 转义：知识条目内容不可信，禁止直接插入 innerHTML（防存储型 XSS）
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text == null ? '' : String(text);
+            return div.innerHTML;
+        }
+
         let knowledgeData = [];
         let categories = [];
         
@@ -640,18 +647,18 @@
                 html += `
                     <div class="knowledge-list" style="margin-bottom: 20px;">
                         <div style="background: #f8f9fa; padding: 15px; font-weight: bold; font-size: 16px;">
-                            📁 ${category} (${docs.length}条)
+                            📁 ${escapeHtml(category)} (${docs.length}条)
                         </div>
                         ${docs.map(doc => `
                             <div class="knowledge-item">
-                                <div class="knowledge-content">${doc.content}</div>
+                                <div class="knowledge-content">${escapeHtml(doc.content)}</div>
                                 <div class="knowledge-meta">
                                     <span>ID: ${doc.id}</span>
                                     <span>更新: ${new Date(doc.updated_at).toLocaleString()}</span>
                                 </div>
                                 ${doc.keywords && doc.keywords.length > 0 ? `
                                     <div style="margin-top: 8px;">
-                                        ${doc.keywords.map(keyword => `<span class="keywords-tag">${keyword}</span>`).join('')}
+                                        ${doc.keywords.map(keyword => `<span class="keywords-tag">${escapeHtml(keyword)}</span>`).join('')}
                                     </div>
                                 ` : ''}
                             </div>
@@ -674,16 +681,16 @@
             
             const html = knowledgeData.map(doc => `
                 <div class="knowledge-item">
-                    <div class="knowledge-content">${doc.content}</div>
+                    <div class="knowledge-content">${escapeHtml(doc.content)}</div>
                     <div class="knowledge-meta">
                         <span>ID: ${doc.id}</span>
-                        <span class="category-badge">${doc.category || '未分类'}</span>
+                        <span class="category-badge">${escapeHtml(doc.category || '未分类')}</span>
                         <span>创建: ${new Date(doc.created_at).toLocaleString()}</span>
                         <span>更新: ${new Date(doc.updated_at).toLocaleString()}</span>
                     </div>
                     ${doc.keywords && doc.keywords.length > 0 ? `
                         <div style="margin-top: 8px;">
-                            ${doc.keywords.map(keyword => `<span class="keywords-tag">${keyword}</span>`).join('')}
+                            ${doc.keywords.map(keyword => `<span class="keywords-tag">${escapeHtml(keyword)}</span>`).join('')}
                         </div>
                     ` : ''}
                     <div class="knowledge-actions">
@@ -700,7 +707,7 @@
         function updateCategorySelects() {
             const searchCategory = document.getElementById('searchCategory');
             searchCategory.innerHTML = '<option value="">全部分类</option>' + 
-                categories.map(cat => `<option value="${cat}">${cat}</option>`).join('');
+                categories.map(cat => `<option value="${escapeHtml(cat)}">${escapeHtml(cat)}</option>`).join('');
         }
         
         // 标签页切换
@@ -774,18 +781,18 @@
                     ${data.results.map((doc, index) => `
                         <div class="knowledge-item search-result">
                             <div class="knowledge-content">
-                                ${doc.content}
+                                ${escapeHtml(doc.content)}
                                 <span class="score-badge">相似度: ${(doc.score || 0).toFixed(3)}</span>
                             </div>
                             <div class="knowledge-meta">
                                 <span>#${index + 1}</span>
                                 <span>ID: ${doc.id}</span>
-                                <span class="category-badge">${doc.category || '未分类'}</span>
+                                <span class="category-badge">${escapeHtml(doc.category || '未分类')}</span>
                                 <span>排名: ${doc.rank || index + 1}</span>
                             </div>
                             ${doc.keywords && doc.keywords.length > 0 ? `
                                 <div style="margin-top: 8px;">
-                                    ${doc.keywords.map(keyword => `<span class="keywords-tag">${keyword}</span>`).join('')}
+                                    ${doc.keywords.map(keyword => `<span class="keywords-tag">${escapeHtml(keyword)}</span>`).join('')}
                                 </div>
                             ` : ''}
                         </div>

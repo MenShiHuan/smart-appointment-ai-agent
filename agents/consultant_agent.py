@@ -20,7 +20,7 @@ class ConsultantAgent:
     2. 协调整个咨询流程（实例本身无状态，会话状态挂载在 SessionContext 上）
     """
 
-    def __init__(self, session_id=None):
+    def __init__(self, session_id=None, memory_recaller=None):
         # 基础设置（default_session_id 仅用于无会话的独立运行场景）
         self.default_session_id = session_id or str(uuid.uuid4())
         self.unrelated_callback = None
@@ -32,11 +32,28 @@ class ConsultantAgent:
         self.knowledge_retriever = KnowledgeRetriever()
         self.consultation_classifier = ConsultationClassifier(self.llm)
         self.response_generator = ResponseGenerator(self.llm)
+        # C4b：未显式注入时使用默认记忆召回器（MemoryService.recall）
+        if memory_recaller is None:
+            memory_recaller = self._default_memory_recaller()
         self.consultation_processor = ConsultationProcessor(
             self.knowledge_retriever,
             self.consultation_classifier,
-            self.response_generator
+            self.response_generator,
+            memory_recaller=memory_recaller,
         )
+
+    @staticmethod
+    def _default_memory_recaller():
+        """默认召回器：基于分层记忆条目加权召回（单用户 default_user）"""
+        from services.memory_service import MemoryService
+        service = MemoryService()
+
+        async def recaller(user_input):
+            entries = await service.recall("default_user", user_input)
+            return [{"entry_type": e["entry_type"], "content": e["content"]}
+                    for e in entries]
+
+        return recaller
 
     def _initialize_llm(self):
         """初始化通用聊天模型"""

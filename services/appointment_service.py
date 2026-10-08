@@ -18,29 +18,34 @@ logger = logging.getLogger(__name__)
 class AppointmentService:
     """预约服务类"""
     
-    def __init__(self, db_path: str = 'sqlite:///data/smart_appointment.db'):
+    def __init__(self, db_path: str = None):
         self.db_router = DatabaseRouter(db_path)
         self.technician_repo = self.db_router.technicians
     
-    def save_appointment(self, technician_id: str, start_time: datetime, 
-                        end_time: datetime, appointment_history: Dict[str, Any], 
+    def save_appointment(self, technician_id: str, start_time: datetime,
+                        end_time: datetime, appointment_history: Dict[str, Any],
                         session_id: str) -> bool:
-        """保存预约信息到数据库"""
+        """保存预约信息到数据库（事务内冲突复查，冲突返回 False）"""
         try:
             appointment_id = int(time.time() * 1000)
-            
-            # 保存预约到数据库
-            self.technician_repo.add_schedule(
+
+            # 同一事务内检查冲突并落库，避免双订竞态
+            schedule_id = self.technician_repo.save_appointment_if_available(
                 technician_id=int(technician_id),
                 start_time=start_time,
                 end_time=end_time,
                 status="busy",
                 appointment_id=appointment_id
             )
-            
+            if schedule_id is None:
+                logger.warning(
+                    f"预约落库失败：时段冲突 技师ID={technician_id}, "
+                    f"时间={start_time} 到 {end_time}")
+                return False
+
             logger.info(f"预约信息已保存到数据库：技师ID={technician_id}, 时间={start_time} 到 {end_time}, 预约ID={appointment_id}")
             return True
-            
+
         except Exception as e:
             logger.error(f"保存预约信息到数据库失败：{e}")
             return False

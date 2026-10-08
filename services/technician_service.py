@@ -12,52 +12,52 @@ class TechnicianService:
     def __init__(self):
         self.db = DatabaseRouter()
         
-        # 默认技师数据（10人，其中有两位擅长内容接近）
+        # 默认理疗师数据（10人，其中有两位擅长内容接近）
         self.default_technicians = [
             {
                 "name": "张伟",
                 "gender": "男",
-                "strength": "擅长深层组织按摩，力气大，善于缓解肩颈腰背酸痛，注重肌肉深层放松"
+                "strength": "擅长肩颈腰背理疗，手法力度大，善于缓解深层肌肉酸痛，注重肌肉深层放松"
             },
             {
                 "name": "王强",
                 "gender": "男",
-                "strength": "深层组织按摩专家，手法扎实，专注于运动损伤修复和肌肉放松"
+                "strength": "深层肌肉理疗专家，手法扎实，专注于运动损伤康复和肌肉放松"
             },
             {
                 "name": "李娜",
-                "gender": "女", 
-                "strength": "手法细腻，擅长舒缓放松，适合压力大、睡眠差人群"
+                "gender": "女",
+                "strength": "从业多年经验丰富，手法专业细腻、深受顾客好评，擅长舒缓放松类理疗与肩颈调理，适合压力大、睡眠差人群"
             },
             {
                 "name": "赵敏",
                 "gender": "女",
-                "strength": "精通经络推拿，善于调理亚健康，力气适中"
+                "strength": "精通经络理疗，善于调理亚健康，手法力度适中"
             },
             {
                 "name": "刘洋",
                 "gender": "男",
-                "strength": "泰式按摩高手，拉伸到位，适合喜欢全身放松的客户"
+                "strength": "全身放松理疗专家，拉伸到位，适合喜欢全身放松的客户"
             },
             {
                 "name": "孙丽",
                 "gender": "女",
-                "strength": "芳香精油按摩，舒缓情绪，适合女性客户"
+                "strength": "芳香精油理疗，舒缓情绪，适合女性客户"
             },
             {
                 "name": "周杰",
                 "gender": "男",
-                "strength": "中医推拿，针对颈椎、腰椎问题有丰富经验"
+                "strength": "中医理疗，针对颈椎、腰椎问题有丰富经验"
             },
             {
                 "name": "吴婷",
                 "gender": "女",
-                "strength": "头部按摩和足疗专家，助眠效果好"
+                "strength": "头部理疗和足部理疗专家，助眠效果好"
             },
             {
                 "name": "郑斌",
                 "gender": "男",
-                "strength": "力气大，适合喜欢重手法的客户，善于肌肉放松"
+                "strength": "手法力度大，适合喜欢重手法的客户，善于肌肉放松"
             },
             {
                 "name": "何静",
@@ -66,14 +66,29 @@ class TechnicianService:
             }
         ]
 
+    # 旧种子专长 → 新专长的定向迁移（E1 配套：补齐理疗师档案信息，供咨询链引用）
+    _strength_migrations = {
+        "李娜": ("手法细腻，擅长舒缓放松类理疗，适合压力大、睡眠差人群",
+                 "从业多年经验丰富，手法专业细腻、深受顾客好评，擅长舒缓放松类理疗与肩颈调理，适合压力大、睡眠差人群"),
+    }
+
+    def _migrate_seed_strengths(self):
+        """已有库的种子专长定向更新（仅当当前值恰为旧种子值时更新，不动运营修改）"""
+        for name, (old, new) in self._strength_migrations.items():
+            tech = self.db.technicians.get_technician_by_name(name)
+            if tech and tech.get("strength") == old:
+                self.db.technicians.update_technician(tech["id"], strength=new)
+                logger.info(f"理疗师 {name} 专长档案已更新")
+
     def initialize_default_technicians(self) -> bool:
         """初始化默认技师数据"""
         try:
             # 检查是否已有技师数据
             existing_technicians = self.db.technicians.get_all_technicians()
-            
+
             if existing_technicians:
-                logger.info(f"数据库中已有 {len(existing_technicians)} 位技师，跳过初始化")
+                logger.info(f"数据库中已有 {len(existing_technicians)} 位理疗师，执行种子档案迁移检查")
+                self._migrate_seed_strengths()
                 return True
             
             logger.info("数据库中无技师数据，开始初始化默认技师")
@@ -129,15 +144,3 @@ class TechnicianService:
         """获取技师总数"""
         technicians = self.db.technicians.get_all_technicians()
         return len(technicians)
-
-    def get_technician_by_id(self, technician_id: int) -> Dict[str, Any]:
-        """根据ID获取技师信息"""
-        return self.db.technicians.get_technician_by_id(technician_id)
-
-    def get_technician_schedules(self, technician_id: int, date) -> List[Dict[str, Any]]:
-        """获取技师指定日期的排班信息"""
-        return self.db.technicians.get_technician_schedules(technician_id, date)
-
-    def is_technician_available(self, technician_id: int, start_time, end_time) -> bool:
-        """检查技师在指定时间段是否可用"""
-        return self.db.technicians.is_technician_available(technician_id, start_time, end_time)

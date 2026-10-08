@@ -151,25 +151,6 @@ class BehaviorRecorder:
             self.logger.error(f"获取行为统计失败: {str(e)}")
             return {}
     
-    def delete_old_behaviors(self, days_to_keep: int = 90) -> int:
-        """
-        删除旧的行为记录
-        
-        Args:
-            days_to_keep: 保留多少天的记录
-            
-        Returns:
-            int: 删除的记录数量
-        """
-        try:
-            # 这里假设behavior_db有对应的方法，实际实现可能需要调整
-            deleted_count = 0
-            self.logger.info(f"清理了 {deleted_count} 条旧行为记录")
-            return deleted_count
-        except Exception as e:
-            self.logger.error(f"清理旧行为记录失败: {str(e)}")
-            return 0
-    
     def validate_behavior_data(self, action_type: str, action_data: Dict[str, Any]) -> bool:
         """
         验证行为数据的有效性

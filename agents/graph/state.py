@@ -16,3 +16,5 @@ class AgentGraphState(TypedDict, total=False):
     loop_count: int      # 自愈循环计数（B3 档期冲突重规划使用）
     needs_replan: bool   # 档期冲突待重规划标记（B3）
     tried_hashes: List[str]  # 已尝试的 (理疗师, 时间) 哈希，用于熔断（B3）
+    appointment_history: dict   # 预约槽位快照（C12：随 checkpointer 持久化，重启恢复）
+    session_state: str          # 会话状态机状态（C12：随 checkpointer 持久化）

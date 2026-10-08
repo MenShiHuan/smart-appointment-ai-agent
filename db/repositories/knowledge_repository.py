@@ -2,7 +2,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 from ..base.interfaces import BaseKnowledgeRepository
 from ..base.session_manager import SessionManager
-from ..models import KnowledgeDocument
+from ..models import utcnow, KnowledgeDocument
 
 
 class KnowledgeRepository(BaseKnowledgeRepository):
@@ -52,10 +52,10 @@ class KnowledgeRepository(BaseKnowledgeRepository):
     def get_document(self, doc_id: int) -> Optional[Dict[str, Any]]:
         """
         获取指定文档
-        
+
         Args:
             doc_id: 文档ID
-            
+
         Returns:
             文档信息字典，如果不存在返回None
         """
@@ -63,11 +63,30 @@ class KnowledgeRepository(BaseKnowledgeRepository):
             document = session.query(KnowledgeDocument).filter(
                 KnowledgeDocument.id == doc_id
             ).first()
-            
+
             if not document:
                 return None
-                
+
             return self._document_to_dict(document)
+
+    def get_documents_by_ids(self, doc_ids: List[int]) -> Dict[int, Dict[str, Any]]:
+        """
+        批量获取文档（D1：检索回查由 N+1 改为一次 IN 查询）
+
+        Args:
+            doc_ids: 文档 ID 列表
+
+        Returns:
+            {doc_id: 文档字典}；软删除文档被过滤，不出现在结果中
+        """
+        if not doc_ids:
+            return {}
+        with self.session_manager.session_scope() as session:
+            documents = session.query(KnowledgeDocument).filter(
+                KnowledgeDocument.id.in_(doc_ids),
+                KnowledgeDocument.is_active == 1,
+            ).all()
+            return {doc.id: self._document_to_dict(doc) for doc in documents}
 
     def get_all_documents(self, include_inactive: bool = False) -> List[Dict[str, Any]]:
         """
@@ -120,7 +139,7 @@ class KnowledgeRepository(BaseKnowledgeRepository):
             if embedding is not None:
                 document.embedding = embedding
             
-            document.updated_at = datetime.utcnow()
+            document.updated_at = utcnow()
             return True
 
     def delete_document(self, doc_id: int, soft_delete: bool = True) -> bool:
@@ -144,7 +163,7 @@ class KnowledgeRepository(BaseKnowledgeRepository):
             
             if soft_delete:
                 document.is_active = 0
-                document.updated_at = datetime.utcnow()
+                document.updated_at = utcnow()
             else:
                 session.delete(document)
             

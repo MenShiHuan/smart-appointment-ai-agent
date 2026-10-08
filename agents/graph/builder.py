@@ -80,16 +80,18 @@ def build_agent_graph(task_agent, checkpointer=None):
     return graph.compile(checkpointer=checkpointer)
 
 
-async def stream_graph_task(graph, user_input: str, session_id: str):
+async def stream_graph_task(graph, user_input: str, session_id: str, config: dict = None):
     """
     以图运行一轮任务并流式透出 token
 
     stream_mode=["custom", "updates"]：custom 承载节点实时写出的 token，
     updates 承载节点状态更新（调试/断点恢复用）。
     """
+    if config is None:
+        config = {"configurable": {"thread_id": session_id}}
     async for mode, payload in graph.astream(
         {"user_input": user_input, "session_id": session_id},
-        config={"configurable": {"thread_id": session_id}},
+        config=config,
         stream_mode=["custom", "updates"],
     ):
         if mode == "custom":

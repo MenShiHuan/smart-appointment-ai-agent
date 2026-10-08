@@ -2,7 +2,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from ..base.interfaces import BaseUserBehaviorRepository
 from ..base.session_manager import SessionManager
-from ..models import UserBehavior, UserPreference, UserRecommendation, Technician
+from ..models import utcnow, UserBehavior, UserPreference, UserRecommendation, Technician
 
 
 class UserBehaviorRepository(BaseUserBehaviorRepository):
@@ -72,7 +72,7 @@ class UserBehaviorRepository(BaseUserBehaviorRepository):
                 query = query.filter(UserBehavior.action_type == action_type)
             
             if days_back:
-                cutoff_date = datetime.utcnow() - timedelta(days=days_back)
+                cutoff_date = utcnow() - timedelta(days=days_back)
                 query = query.filter(UserBehavior.created_at >= cutoff_date)
             
             behaviors = query.order_by(UserBehavior.created_at.desc()).all()
@@ -97,6 +97,27 @@ class UserBehaviorRepository(BaseUserBehaviorRepository):
             
             return [self._behavior_to_dict(behavior) for behavior in behaviors]
 
+    def get_behaviors_after_id(self, user_id: str, last_id: int,
+                               limit: int = 50) -> List[Dict[str, Any]]:
+        """
+        增量回放：获取 id 大于 last_id 的行为记录（升序，游标批量拉取）
+
+        C4a 离线记忆整合使用；按 id 升序保证水位单调推进、重试不重复消费。
+        """
+        with self.session_manager.session_scope() as session:
+            behaviors = session.query(UserBehavior).filter(
+                UserBehavior.user_id == user_id,
+                UserBehavior.id > last_id,
+            ).order_by(UserBehavior.id.asc()).limit(limit).all()
+            return [self._behavior_to_dict(behavior) for behavior in behaviors]
+
+    def count_distinct_sessions(self, user_id: str) -> int:
+        """统计该用户行为事件覆盖的去重会话数（触发判定口径）"""
+        with self.session_manager.session_scope() as session:
+            return session.query(UserBehavior.session_id).filter(
+                UserBehavior.user_id == user_id,
+            ).distinct().count()
+
     def update_user_preference(self, user_id: str, preference_type: str, preference_value: str) -> bool:
         """
         更新用户偏好
@@ -120,7 +141,7 @@ class UserBehaviorRepository(BaseUserBehaviorRepository):
             if existing:
                 # 增加置信度
                 existing.confidence_score += 1
-                existing.last_updated = datetime.utcnow()
+                existing.last_updated = utcnow()
             else:
                 # 创建新偏好
                 preference = UserPreference(
@@ -131,6 +152,24 @@ class UserBehaviorRepository(BaseUserBehaviorRepository):
                 )
                 session.add(preference)
             
+            return True
+
+    def delete_user_preference(self, user_id: str, preference_type: str) -> bool:
+        """
+        删除用户的某类偏好（清除偏好语义）
+
+        Args:
+            user_id: 用户ID
+            preference_type: 偏好类型
+
+        Returns:
+            删除是否成功
+        """
+        with self.session_manager.session_scope() as session:
+            session.query(UserPreference).filter(
+                UserPreference.user_id == user_id,
+                UserPreference.preference_type == preference_type,
+            ).delete()
             return True
 
     def get_user_preferences(self, user_id: str, preference_type: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -234,7 +273,7 @@ class UserBehaviorRepository(BaseUserBehaviorRepository):
             
             if recommendation:
                 recommendation.is_sent = 1
-                recommendation.sent_at = datetime.utcnow()
+                recommendation.sent_at = utcnow()
                 return True
             return False
 
@@ -250,7 +289,7 @@ class UserBehaviorRepository(BaseUserBehaviorRepository):
             用户统计信息字典
         """
         with self.session_manager.session_scope() as session:
-            cutoff_date = datetime.utcnow() - timedelta(days=days_back)
+            cutoff_date = utcnow() - timedelta(days=days_back)
             
             # 总行为数
             total_behaviors = session.query(UserBehavior).filter(
@@ -300,7 +339,7 @@ class UserBehaviorRepository(BaseUserBehaviorRepository):
                 'favorite_technician_name': favorite_technician[1] if favorite_technician else None,
                 'favorite_technician_visits': favorite_technician[2] if favorite_technician else 0,
                 'last_visit_date': last_visit.created_at if last_visit else None,
-                'days_since_last_visit': (datetime.utcnow() - last_visit.created_at).days if last_visit else None,
+                'days_since_last_visit': (utcnow() - last_visit.created_at).days if last_visit else None,
                 'period_days': days_back
             }
 
@@ -315,7 +354,7 @@ class UserBehaviorRepository(BaseUserBehaviorRepository):
             技师受欢迎程度列表
         """
         with self.session_manager.session_scope() as session:
-            cutoff_date = datetime.utcnow() - timedelta(days=days_back)
+            cutoff_date = utcnow() - timedelta(days=days_back)
             
             from sqlalchemy import func
             

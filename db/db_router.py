@@ -1,32 +1,37 @@
-from .base import SessionManager
-from .repositories import TechnicianRepository, KnowledgeRepository, UserBehaviorRepository, ConversationRepository
+from .base import get_session_manager
+from .repositories import (TechnicianRepository, KnowledgeRepository,
+                           UserBehaviorRepository, ConversationRepository, MemoryRepository)
 from typing import Optional
 
 
 class DatabaseRouter:
     """
     数据库路由器
-    
+
     职责：
     1. 管理数据库连接和会话
     2. 提供统一的数据访问入口
     3. 协调各个Repository的操作
+
+    会话管理器为进程级共享（按 db_path 键控），db_path 为 None 时
+    取 DATABASE_URL 环境变量（评测隔离入口）。
     """
-    
-    def __init__(self, db_path: str = 'sqlite:///data/smart_appointment.db'):
+
+    def __init__(self, db_path: str = None):
         """
         初始化数据库路由器
-        
+
         Args:
             db_path: 数据库连接路径
         """
-        self.session_manager = SessionManager(db_path)
+        self.session_manager = get_session_manager(db_path)
         
         # 初始化各个Repository
         self.technician_repo = TechnicianRepository(self.session_manager)
         self.knowledge_repo = KnowledgeRepository(self.session_manager)
         self.user_behavior_repo = UserBehaviorRepository(self.session_manager)
         self.conversation_repo = ConversationRepository(self.session_manager)
+        self.memory_repo = MemoryRepository(self.session_manager)
 
     @property
     def technicians(self) -> TechnicianRepository:
@@ -47,6 +52,11 @@ class DatabaseRouter:
     def conversation(self) -> ConversationRepository:
         """获取会话消息数据仓库"""
         return self.conversation_repo
+
+    @property
+    def memory(self) -> MemoryRepository:
+        """获取记忆条目数据仓库"""
+        return self.memory_repo
 
     def close(self):
         """关闭数据库连接"""
@@ -154,5 +164,5 @@ class UserBehaviorDBRouter:
     def get_user_preferences(self, user_id: str):
         return self.user_behavior_repo.get_user_preferences(user_id)
 
-    def update_user_preference(self, user_id: str, preference_type: str, preference_value: str, confidence_score: int = 1) -> bool:
-        return self.user_behavior_repo.update_user_preference(user_id, preference_type, preference_value, confidence_score)
+    def update_user_preference(self, user_id: str, preference_type: str, preference_value: str) -> bool:
+        return self.user_behavior_repo.update_user_preference(user_id, preference_type, preference_value)

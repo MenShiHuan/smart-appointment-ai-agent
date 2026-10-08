@@ -371,7 +371,7 @@
                 智能预约助手
             </div>
             <div class="header-subtitle">
-                AI驱动的按摩房预约系统 - 为您提供便捷智能的预约体验
+                AI驱动的健康理疗预约助手 - 为您提供便捷智能的预约体验
             </div>
         </div>
         
@@ -387,11 +387,11 @@
             </button>
             <button class="nav-btn" onclick="window.location.href='/technician'">
                 <i class="fas fa-users"></i>
-                技师状态
+                理疗师状态
             </button>
             <button class="nav-btn" onclick="window.location.href='/technician_schedule'">
                 <i class="fas fa-calendar-alt"></i>
-                技师排班
+                理疗师排班
             </button>
             <button class="nav-btn" id="clear-btn">
                 <i class="fas fa-trash-alt"></i>
@@ -412,8 +412,8 @@
                     </div>
                     <div class="bot-reply">
                         我可以帮您：<br>
-                        • 🕐 预约按摩服务<br>
-                        • 👨‍⚕️ 查询技师状态<br>
+                        • 🕐 预约理疗服务<br>
+                        • 👨‍⚕️ 查询理疗师状态<br>
                         • 📅 安排预约时间<br>
                         • ❓ 解答相关问题
                     </div>
@@ -453,10 +453,17 @@
     const typingIndicator = document.getElementById('typing-indicator');
     let lastBotBubble = null;
 
+    // HTML 转义：LLM 回复与用户输入均不可信，禁止直接插入 innerHTML（防 XSS）
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
     function addMessage(text, sender) {
         const msgDiv = document.createElement('div');
         msgDiv.className = 'message ' + sender;
-        
+
         const avatar = document.createElement('div');
         avatar.className = 'avatar';
         if (sender === 'user') {
@@ -464,10 +471,10 @@
         } else {
             avatar.innerHTML = '<i class="fas fa-robot"></i>';
         }
-        
+
         const bubble = document.createElement('div');
         bubble.className = 'bubble';
-        bubble.innerHTML = text.replace(/\n/g, '<br>');
+        bubble.innerHTML = escapeHtml(text).replace(/\n/g, '<br>');
         
         msgDiv.appendChild(avatar);
         msgDiv.appendChild(bubble);
@@ -507,11 +514,11 @@
             while ((match = pattern.exec(text)) !== null) {
                 if (match[1]) {
                     // THOUGHT - 思考过程，用淡色显示
-                    const thoughtText = match[1].replace(/\[THOUGHT[^\]]*\]/, '').trim().replace(/\n/g, '<br>');
+                    const thoughtText = escapeHtml(match[1].replace(/\[THOUGHT[^\]]*\]/, '').trim()).replace(/\n/g, '<br>');
                     result.push(`<div class="bot-thought">${thoughtText}</div>`);
                 } else if (match[2]) {
                     // REPLY - 最终回复，使用突出颜色
-                    const replyText = match[2].replace(/\[REPLY[^\]]*\]/, '').trim().replace(/\n/g, '<br>');
+                    const replyText = escapeHtml(match[2].replace(/\[REPLY[^\]]*\]/, '').trim()).replace(/\n/g, '<br>');
                     
                     // 检查回复类型并应用不同样式
                     let styledReply = replyText;

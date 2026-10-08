@@ -11,10 +11,12 @@ from .technician_repository import TechnicianRepository
 from .knowledge_repository import KnowledgeRepository
 from .user_behavior_repository import UserBehaviorRepository
 from .conversation_repository import ConversationRepository
+from .memory_repository import MemoryRepository
 
 __all__ = [
     'TechnicianRepository',
     'KnowledgeRepository',
     'UserBehaviorRepository',
-    'ConversationRepository'
+    'ConversationRepository',
+    'MemoryRepository'
 ]

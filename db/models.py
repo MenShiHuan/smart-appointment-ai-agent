@@ -1,9 +1,17 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, JSON
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship
-from datetime import datetime
+from sqlalchemy import Column, Integer, Float, String, DateTime, ForeignKey, Text, JSON
+from sqlalchemy.orm import declarative_base, relationship
+from datetime import datetime, timezone
 
 Base = declarative_base()
+
+
+def utcnow():
+    """统一的时间戳默认值：naive UTC（存储口径，替代已弃用的 datetime.utcnow）
+
+    约定：所有 created_at/updated_at/last_updated 列存 naive UTC 墙钟；
+    业务时间列（如排班 start_time/end_time）存北京墙钟。
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 class Technician(Base):
     __tablename__ = 'technicians'
@@ -30,8 +38,8 @@ class KnowledgeDocument(Base):
     category = Column(String, nullable=False)
     keywords = Column(JSON, nullable=True)  # 存储关键词列表
     embedding = Column(JSON, nullable=True)  # 存储嵌入向量
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
     is_active = Column(Integer, default=1)  # 软删除标记
 
 class UserBehavior(Base):
@@ -42,7 +50,7 @@ class UserBehavior(Base):
     action_data = Column(JSON, nullable=True)  # 存储行为相关的详细数据
     technician_id = Column(Integer, ForeignKey('technicians.id'), nullable=True)
     session_id = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     technician = relationship("Technician")
 
 class UserPreference(Base):
@@ -52,7 +60,7 @@ class UserPreference(Base):
     preference_type = Column(String, nullable=False)  # 'technician', 'time', 'service', 'duration'
     preference_value = Column(String, nullable=False)
     confidence_score = Column(Integer, default=1)  # 偏好的置信度（出现次数）
-    last_updated = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_updated = Column(DateTime, default=utcnow, onupdate=utcnow)
 
 class UserRecommendation(Base):
     __tablename__ = 'user_recommendations'
@@ -62,7 +70,7 @@ class UserRecommendation(Base):
     content = Column(Text, nullable=False)
     technician_id = Column(Integer, ForeignKey('technicians.id'), nullable=True)
     is_sent = Column(Integer, default=0)  # 是否已发送
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     sent_at = Column(DateTime, nullable=True)
     technician = relationship("Technician")
 
@@ -74,4 +82,43 @@ class ConversationMessage(Base):
     session_id = Column(String, nullable=False, index=True)
     role = Column(String, nullable=False)  # 'user' | 'assistant'
     content = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+
+
+class MemoryEntry(Base):
+    """记忆条目表 - 离线整合产出，分层记忆加权召回共用（C4a/C4b）"""
+    __tablename__ = 'memory_entries'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(String, nullable=False, default='default_user', index=True)
+    entry_type = Column(String, nullable=False)  # service/time_period/duration/technician/technician_type
+    content = Column(Text, nullable=False)
+    embedding = Column(JSON, nullable=True)  # bge-m3 1024 维浮点向量
+    importance = Column(Float, default=1.0)
+    confidence = Column(Float, default=0.0)
+    evidence_count = Column(Integer, default=1)
+    distinct_sessions = Column(Integer, default=1)
+    sessions = Column(JSON, default=list)  # 贡献证据的 session_id 列表（跨会话次数依据）
+    last_evidence_at = Column(DateTime, default=utcnow)
+    status = Column(String, default='active')  # 'active' | 'retired'
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class IntegrationWatermark(Base):
+    """记忆整合水位检查点表 - 增量回放游标与触发条件判定（C4a）"""
+    __tablename__ = 'integration_watermarks'
+    user_id = Column(String, primary_key=True)
+    last_behavior_id = Column(Integer, default=0)
+    last_integration_at = Column(DateTime, nullable=True)
+    session_count_at_last_run = Column(Integer, default=0)
+
+
+class MemoryChangeLog(Base):
+    """记忆整合变更日志表 - 幂等审计（C4a）"""
+    __tablename__ = 'memory_change_logs'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(String, nullable=False, default='default_user', index=True)
+    operation = Column(String, nullable=False)  # create/merge/downweight/retire/promote
+    entry_id = Column(Integer, nullable=True)  # 关联 MemoryEntry.id；promote 写 UserPreference 时为 0
+    detail = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=utcnow)

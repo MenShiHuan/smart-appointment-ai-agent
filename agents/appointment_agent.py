@@ -3,7 +3,12 @@ import uuid
 from langchain_core.chat_history import InMemoryChatMessageHistory
 from config.model_provider import create_chat_model
 from config.constants import StateEnum
-from agents.core.session import SessionContext, new_appointment_history
+from agents.core.session import (
+    SessionContext,
+    MessageWindowManager,
+    new_appointment_history,
+    windowed_history_str,
+)
 from .appointment import (
     InputParser,
     TechnicianFinder,
@@ -72,15 +77,32 @@ class AppointmentAgent:
                 禁忌转人工发出 [SIGNAL]confirmation_pending / [SIGNAL]manual_review，
                 交由 LangGraph confirm / manual_review 节点处理。
         """
+        # 服务端路径必须显式传入 user_input；阻塞式交互输入在 async 生成器内不可用
         if user_input is None:
-            user_input = input("用户：")
+            raise ValueError("user_input 不能为空（服务端路径必须显式传入）")
 
         ctx = session or self._transient_session()
 
-        # 1. 解析用户输入（结构化输出 + 修复重试；内部 JSON 不向用户流式输出）
-        extraction = await self.input_parser.extract(user_input, ctx.chat_history)
-
         try:
+            # 0. 窗口管理（C4b）：未压缩消息达窗口 60% 时压缩为滚动摘要；
+            #    只压缩上次摘要之后的新消息（历史全量不裁剪，避免输入无界增长）
+            window = MessageWindowManager()
+            messages = ctx.chat_history.messages
+            unsummarized = len(messages) - ctx.window_summary_upto
+            if window.should_compress(messages, unsummarized):
+                keep_count = min(window.keep_after_summary, len(messages))
+                to_summarize = messages[ctx.window_summary_upto:len(messages) - keep_count]
+                if to_summarize:
+                    ctx.window_summary = await window.summarize(
+                        self.llm, to_summarize, existing_summary=ctx.window_summary)
+                ctx.window_summary_upto = len(messages) - keep_count
+
+            # 1. 解析用户输入（结构化输出 + 修复重试；内部 JSON 不向用户流式输出）
+            history_text = windowed_history_str(
+                ctx.chat_history.messages, ctx.window_summary)
+            extraction = await self.input_parser.extract(
+                user_input, ctx.chat_history, history_text=history_text)
+
             # 2. 使用解析结果
             data = extraction.model_dump()
             finished = self.appointment_processor.update_history_from_data(
@@ -93,8 +115,17 @@ class AppointmentAgent:
                     and not ctx.appointment_history.get('awaiting_confirmation')
                     and not ctx.appointment_history.get('awaiting_booking_confirmation')
                     and not ctx.appointment_history.get('contraindication_hit')):
-                # 注意：这里不清空预约历史，保留用户已输入的信息
-                # 只设置状态为CLASSIFY，让系统转交给其他机器人处理
+                # 预约中途插话（已有槽位）：槽位保留、状态不回退，
+                # 直接输出标准拒绝话术（e2e-010 场景：插话后继续预约流程）
+                has_slots = any(
+                    ctx.appointment_history.get(k)
+                    for k in ("start_time", "project", "technician_name",
+                              "duration", "gender"))
+                if has_slots:
+                    yield f"[REPLY][预约机器人]{self.message_builder.create_unsupported_message()}\n"
+                    return
+
+                # 无槽位（预约流程未开始）：转归类机器人重新分类处理
                 ctx.state.value = StateEnum.CLASSIFY
 
                 async for token in self.appointment_processor.handle_unrelated_request(
@@ -151,6 +182,10 @@ class AppointmentAgent:
             if ctx.appointment_history.get('awaiting_booking_confirmation'):
                 yield f"[REPLY][预约机器人]{self.message_builder.create_reconfirm_message()}"
                 return
+            # 推荐技师确认回应不明确：重问，而不是走不完整信息分支（槽位可能已齐）
+            if ctx.appointment_history.get('awaiting_confirmation'):
+                yield f"[REPLY][预约机器人]\n机器人：请您明确回复\"是\"或\"不\"，我好为您安排预约。\n"
+                return
             async for token in self.appointment_processor.handle_incomplete_info(data, ctx.appointment_history):
                 yield token
 
@@ -161,4 +196,6 @@ class AppointmentAgent:
         """预约完成后重置会话内的预约状态"""
         ctx.appointment_history = new_appointment_history()
         ctx.chat_history.clear()
+        ctx.window_summary = None
+        ctx.window_summary_upto = 0
         ctx.state.value = StateEnum.CLASSIFY

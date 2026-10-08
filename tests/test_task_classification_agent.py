@@ -1,256 +1,185 @@
 """
-TaskClassificationAgent 功能测试 - 基于真实工作流程
+任务分类 Agent 离线测试（C1 重写）
 
-测试任务分类代理的实际功能：
-1. 任务分类和智能路由 - 不返回分类标签，而是直接处理任务
-2. 流式任务处理
-3. 对话状态管理
-4. 无关请求处理
+原 8 个用例依赖真实 LLM（4 个走真实 API 侥幸通过、4 个引用旧属性失败）。
+重写要点：
+- TaskClassifier 经 monkeypatch 替换为脚本化 stub（绕过 LCEL 对真实 LLM 的依赖）
+- 下游 Agent 用 stub 替换，验证路由/状态机行为而非生成质量
+- 会话挂临时 SQLite（SessionRegistry db_path 注入），不触碰 data/ 真实库
 """
+import asyncio
 
 import pytest
+
+from agents.core.session import SessionRegistry
 from agents.task_classification_agent import TaskClassificationAgent
-from agents.appointment_agent import AppointmentAgent
-from agents.consultant_agent import ConsultantAgent
+from config.constants import StateEnum
 
 
-class TestTaskClassificationAgentRealWorkflow:
-    """测试任务分类代理真实工作流程"""
-    
-    @pytest.mark.asyncio
-    async def test_should_route_consultation_requests_correctly(self):
-        """
-        测试：应该正确路由咨询请求到ConsultantAgent
-        
-        验证咨询请求能够被识别并路由到咨询代理
-        """
-        appointment_agent = AppointmentAgent()
-        consultant_agent = ConsultantAgent()
-        
-        agent = TaskClassificationAgent(appointment_agent, consultant_agent)
-        
-        consultation_requests = [
-            "按摩有什么好处？",
-            "推拿多少钱？",
-            "你们有什么服务项目？",
-        ]
-        
-        for user_input in consultation_requests:
-            response = await agent.classify_task(user_input)
-            
-            # 应该返回有意义的响应
-            assert isinstance(response, str), f"咨询请求应该返回字符串响应，输入：{user_input}"
-            assert len(response) > 0, f"咨询请求应该有响应内容，输入：{user_input}"
-            
-            # 不应该是错误信息
-            assert not response.startswith("处理任务时发生错误"), f"咨询请求不应该返回错误，输入：{user_input}，响应：{response}"
-            assert not response.startswith("暂不支持该类型任务"), f"咨询请求应该被支持，输入：{user_input}，响应：{response}"
-            
-            print(f"咨询路由测试 - 输入：'{user_input}'，响应长度：{len(response)}")
-    
-    @pytest.mark.asyncio
-    async def test_should_handle_unrelated_requests_gracefully(self):
-        """
-        测试：应该优雅处理无关请求
-        
-        验证无关请求得到适当的拒绝响应
-        """
-        appointment_agent = AppointmentAgent()
-        consultant_agent = ConsultantAgent()
-        
-        agent = TaskClassificationAgent(appointment_agent, consultant_agent)
-        
-        unrelated_requests = [
-            "今天天气怎么样？",
-            "北京哪里有好吃的？",
-            "你好",
-            "谢谢"
-        ]
-        
-        for user_input in unrelated_requests:
-            response = await agent.classify_task(user_input)
-            
-            # 应该返回拒绝信息
-            assert isinstance(response, str), f"无关请求应该返回字符串响应，输入：{user_input}"
-            assert len(response) > 0, f"无关请求应该有响应内容，输入：{user_input}"
-            
-            # 应该是拒绝信息
-            expected_rejection = "暂不支持该类型任务。请只询问和按摩、预约相关的问题。"
-            assert response == expected_rejection, f"无关请求应该返回标准拒绝信息，输入：{user_input}，响应：{response}"
-            
-            print(f"无关请求测试 - 输入：'{user_input}'，正确拒绝")
-    
-    @pytest.mark.asyncio
-    async def test_should_work_with_stream_mode(self):
-        """
-        测试：流式任务处理应该正常工作
-        
-        验证流式处理能正确处理任务并返回结果
-        """
-        appointment_agent = AppointmentAgent()
-        consultant_agent = ConsultantAgent()
-        
-        agent = TaskClassificationAgent(appointment_agent, consultant_agent)
-        
-        user_input = "我想预约明天下午的按摩"
-        
-        # 测试流式处理
-        response_tokens = []
-        async for token in agent.classify_task_stream(user_input):
-            response_tokens.append(token)
-        
-        # 应该有响应内容
-        assert len(response_tokens) > 0, "流式处理应该返回内容"
-        
-        # 拼接完整响应
-        full_response = "".join(response_tokens)
-        assert len(full_response) > 0, "完整响应不应该为空"
-        
-        # 响应应该是有意义的内容，不是错误信息
-        assert not full_response.startswith("处理任务时发生错误"), f"流式处理不应该返回错误：{full_response[:100]}"
-        
-        print(f"流式处理测试 - 响应长度：{len(full_response)}")
-    
-    def test_should_manage_conversation_state(self):
-        """
-        测试：应该管理对话状态
-        
-        验证状态管理功能正常工作
-        """
-        appointment_agent = AppointmentAgent()
-        consultant_agent = ConsultantAgent()
-        
-        agent = TaskClassificationAgent(appointment_agent, consultant_agent)
-        
-        # 应该有状态管理器
-        assert hasattr(agent, 'state_manager'), "应该有状态管理器"
-        
-        # 应该能获取状态信息
-        try:
-            state_info = agent.get_classification_info()
-            assert isinstance(state_info, (str, dict)), f"状态信息应该是字符串或字典，但得到：{type(state_info)}"
-        except Exception as e:
-            # 如果方法不存在或有问题，不应该崩溃
-            print(f"获取状态信息时出现问题：{e}")
-    
-    def test_should_reset_conversation(self):
-        """
-        测试：应该能重置对话
-        
-        验证对话重置功能
-        """
-        appointment_agent = AppointmentAgent()
-        consultant_agent = ConsultantAgent()
-        
-        agent = TaskClassificationAgent(appointment_agent, consultant_agent)
-        
-        # 应该能重置对话
-        try:
-            agent.reset_conversation()
-            # 不应该抛出异常
-        except Exception as e:
-            pytest.fail(f"重置对话时出错：{e}")
-        
-        # 应该能设置业务上下文
-        try:
-            agent.set_business_context("推拿服务")
-            # 不应该抛出异常
-        except Exception as e:
-            pytest.fail(f"设置业务上下文时出错：{e}")
+class StubAppointmentAgent:
+    def __init__(self):
+        self.unrelated_callback = None
+
+    async def run_stream(self, user_input=None, session=None,
+                         enable_replan_signal=False, enable_confirm_signal=False):
+        yield "[REPLY][预约机器人]stub-appointment"
 
 
-class TestTaskClassificationAgentEdgeCases:
-    """测试边界情况和错误处理"""
-    
-    @pytest.mark.asyncio
-    async def test_should_handle_empty_or_invalid_input(self):
-        """
-        测试：应该处理空输入或无效输入
-        """
-        appointment_agent = AppointmentAgent()
-        consultant_agent = ConsultantAgent()
-        
-        agent = TaskClassificationAgent(appointment_agent, consultant_agent)
-        
-        invalid_inputs = ["", "   ", "？", "...", "###"]
-        
-        for invalid_input in invalid_inputs:
-            try:
-                response = await agent.classify_task(invalid_input)
-                
-                # 不应该崩溃，应该有某种响应
-                assert isinstance(response, str), f"无效输入应该返回字符串响应，输入：'{invalid_input}'"
-                assert len(response) > 0, f"无效输入应该有响应内容，输入：'{invalid_input}'"
-                
-                # 很可能被当作无关请求处理
-                expected_rejection = "暂不支持该类型任务。请只询问和按摩、预约相关的问题。"
-                is_rejection = response == expected_rejection
-                is_error = response.startswith("处理任务时发生错误")
-                
-                assert is_rejection or is_error, f"无效输入应该被拒绝或报错，输入：'{invalid_input}'，响应：{response}"
-                
-                print(f"无效输入测试 - 输入：'{invalid_input}'，响应类型：{'拒绝' if is_rejection else '错误'}")
-                
-            except Exception as e:
-                # 如果抛出异常，应该是可预期的异常类型
-                assert isinstance(e, (ValueError, TypeError)), \
-                    f"无效输入'{invalid_input}'异常类型错误：{type(e)}"
-    
-    @pytest.mark.asyncio
-    async def test_should_handle_ambiguous_input(self):
-        """
-        测试：应该处理模糊输入
-        
-        一些输入可能很难分类，但不应该崩溃
-        """
-        appointment_agent = AppointmentAgent()
-        consultant_agent = ConsultantAgent()
-        
-        agent = TaskClassificationAgent(appointment_agent, consultant_agent)
-        
-        ambiguous_inputs = [
-            "按摩",  # 单词，可能是预约也可能是咨询
-            "技师",  # 可能是查询技师信息
-            "服务",  # 很模糊
-            "帮助",  # 很泛泛
-        ]
-        
-        for ambiguous_input in ambiguous_inputs:
-            try:
-                response = await agent.classify_task(ambiguous_input)
-                
-                # 应该有某种响应
-                assert isinstance(response, str), f"模糊输入应该返回响应，输入：{ambiguous_input}"
-                assert len(response) > 0, f"模糊输入响应不应该为空，输入：{ambiguous_input}"
-                
-                # 不应该崩溃，可能被路由到任何代理或被拒绝
-                print(f"模糊输入测试 - 输入：'{ambiguous_input}'，响应长度：{len(response)}")
-                
-            except Exception as e:
-                pytest.fail(f"处理模糊输入时出错，输入：{ambiguous_input}，错误：{e}")
-    
-    @pytest.mark.asyncio
-    async def test_should_provide_unrelated_handler_functionality(self):
-        """
-        测试：应该提供专门的无关请求处理功能
-        
-        验证无关请求处理器能正常工作
-        """
-        appointment_agent = AppointmentAgent()
-        consultant_agent = ConsultantAgent()
-        
-        agent = TaskClassificationAgent(appointment_agent, consultant_agent)
-        
-        unrelated_input = "今天天气怎么样？"
-        
-        # 测试专门的无关请求处理方法
-        try:
-            response = await agent.handle_unrelated(unrelated_input)
-            
-            assert isinstance(response, str), "无关请求处理应该返回字符串"
-            assert len(response) > 0, "无关请求处理应该有内容"
-            
-            print(f"无关请求处理测试 - 响应长度：{len(response)}")
-            
-        except Exception as e:
-            pytest.fail(f"无关请求处理出错：{e}")
+class StubConsultant:
+    def set_unrelated_callback(self, callback):
+        self.unrelated_callback = callback
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        pass
+
+    async def consult_stream(self, user_input, session=None):
+        yield "[REPLY][咨询机器人]stub-consult"
+
+
+class StubBehaviorAgent:
+    async def answer_preference_query_stream(self, user_input):
+        yield "[REPLY][记忆机器人]stub-memory"
+
+
+def _make_agent(monkeypatch, tmp_path, categories, with_behavior=False):
+    """构造分类 Agent：分类器按脚本返回类别，会话挂临时库，LLM 不参与"""
+    class StubClassifier:
+        """脚本化分类器：按调用次序返回预置类别"""
+
+        def __init__(self, llm):
+            self.responses = list(categories)
+            self.calls = 0
+
+        async def classify_task(self, task):
+            idx = min(self.calls, len(self.responses) - 1)
+            self.calls += 1
+            return self.responses[idx]
+
+    monkeypatch.setattr("agents.task_classification_agent.TaskClassifier", StubClassifier)
+    monkeypatch.setattr("agents.task_classification_agent.create_chat_model", lambda **kw: object())
+
+    agent = TaskClassificationAgent(
+        StubAppointmentAgent(), StubConsultant(),
+        behavior_agent=StubBehaviorAgent() if with_behavior else None,
+    )
+    agent.session_registry = SessionRegistry(db_path=f"sqlite:///{tmp_path}/c1_cls.db")
+    return agent
+
+
+async def _classify(agent, text, sid="s1"):
+    return await agent.classify_task(text, session_id=sid)
+
+
+def test_consultation_request_routes_to_consultant(monkeypatch, tmp_path):
+    """咨询请求：分类为 query → 路由咨询机器人，状态 CONSULT"""
+    agent = _make_agent(monkeypatch, tmp_path, ["query"])
+
+    response = asyncio.run(_classify(agent, "肩颈理疗有什么好处？"))
+
+    assert "stub-consult" in response
+    assert "[THOUGHT][归类机器人]" in response
+    session = agent.session_registry.get_or_create("s1")
+    assert session.state.value == StateEnum.CONSULT
+
+
+def test_unrelated_request_gets_standard_rejection(monkeypatch, tmp_path):
+    """无关请求：分类为 other → 标准拒绝话术，状态回 CLASSIFY"""
+    agent = _make_agent(monkeypatch, tmp_path, ["other"])
+
+    response = asyncio.run(_classify(agent, "今天天气怎么样？", sid="s2"))
+
+    assert "暂不支持该类型任务" in response
+    assert "健康理疗、预约相关" in response
+    session = agent.session_registry.get_or_create("s2")
+    assert session.state.value == StateEnum.CLASSIFY
+
+
+def test_stream_mode_yields_thought_and_reply(monkeypatch, tmp_path):
+    """流式分类：逐 token 产出思考提示与业务回复"""
+    agent = _make_agent(monkeypatch, tmp_path, ["query"])
+
+    tokens = asyncio.run(_collect_stream(agent, "肩颈理疗多少钱？", sid="s3"))
+
+    joined = "".join(tokens)
+    assert "stub-consult" in joined
+    assert any(t.startswith("[THOUGHT][归类机器人]") for t in tokens)
+
+
+def test_appointment_flow_state_pins_followup_routing(monkeypatch, tmp_path):
+    """状态机优先：预约流程中的后续输入不再走 LLM 分类，直接进预约节点"""
+    agent = _make_agent(monkeypatch, tmp_path, ["appointment", "query"])
+
+    first = asyncio.run(_classify(agent, "我要预约理疗", sid="s4"))
+    assert "stub-appointment" in first
+
+    session = agent.session_registry.get_or_create("s4")
+    assert session.state.value == StateEnum.APPOINTMENT
+
+    # 第二轮：即便分类器本会返回 query，状态机也应继续预约流程
+    second = asyncio.run(_classify(agent, "明天下午2点", sid="s4"))
+    assert "stub-appointment" in second
+    assert "stub-consult" not in second
+
+
+def test_reset_conversation_restores_classify_state(monkeypatch, tmp_path):
+    """重置对话：状态回 CLASSIFY，无关回复轮换索引归零"""
+    agent = _make_agent(monkeypatch, tmp_path, ["appointment"])
+    asyncio.run(_classify(agent, "预约", sid="s5"))
+
+    session = agent.session_registry.get_or_create("s5")
+    session.unrelated_reply_index = 3
+    assert session.state.value == StateEnum.APPOINTMENT
+
+    agent.reset_conversation("s5")
+
+    assert session.state.value == StateEnum.CLASSIFY
+    assert session.unrelated_reply_index == 0
+
+
+def test_invalid_inputs_rejected_without_crash(monkeypatch, tmp_path):
+    """空/无效输入：不崩溃，按无关请求拒绝"""
+    agent = _make_agent(monkeypatch, tmp_path, ["other", "other", "other"])
+
+    for i, invalid in enumerate(["", "   ", "？"]):
+        response = asyncio.run(_classify(agent, invalid, sid=f"bad{i}"))
+        assert isinstance(response, str)
+        assert "暂不支持该类型任务" in response
+
+
+def test_ambiguous_input_routes_without_crash(monkeypatch, tmp_path):
+    """模糊输入：分类结果无论落到哪条路由都应产出响应、不崩溃"""
+    agent = _make_agent(monkeypatch, tmp_path, ["appointment", "query", "memory"], with_behavior=True)
+
+    for i, text in enumerate(["理疗", "理疗师", "我上次预约的是哪位理疗师"]):
+        response = asyncio.run(_classify(agent, text, sid=f"amb{i}"))
+        assert len(response) > 0
+        assert not response.startswith("[ERROR]处理任务时发生错误")
+
+
+def test_unknown_category_falls_back_to_rejection(monkeypatch, tmp_path):
+    """分类结果不属于四类：无匹配路由 → 标准拒绝话术"""
+    agent = _make_agent(monkeypatch, tmp_path, ["不存在的类别"])
+
+    response = asyncio.run(_classify(agent, "随便说点啥", sid="s6"))
+
+    assert "暂不支持该类型任务" in response
+
+
+def test_unrelated_handler_callback_returns_reclassification(monkeypatch, tmp_path):
+    """预约 Agent 的转交回调：handle_unrelated 对同一输入重新分类"""
+    agent = _make_agent(monkeypatch, tmp_path, ["query"])
+    session = agent.session_registry.get_or_create("s7")
+
+    result = asyncio.run(agent.handle_unrelated("理疗有什么项目？", session))
+
+    assert "stub-consult" in result
+
+
+async def _collect_stream(agent, text, sid):
+    tokens = []
+    async for t in agent.classify_task_stream(text, session_id=sid):
+        tokens.append(t)
+    return tokens

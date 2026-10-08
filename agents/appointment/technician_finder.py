@@ -15,6 +15,13 @@ class TechnicianFinder:
     def __init__(self):
         pass
     
+    # 中文时长口语 → 分钟数（兜底映射；正常路径下抽取层已输出"XX分钟"格式）
+    DURATION_CN_MAP = {
+        "半小时": 30, "一个半小时": 90, "1个半小时": 90, "一个半钟头": 90,
+        "一小时": 60, "1小时": 60, "一个钟头": 60, "两小时": 120, "两个小时": 120,
+        "两个钟头": 120, "三小时": 180, "三个小时": 180,
+    }
+
     def parse_time_and_duration(self, start_time_str: str, duration_str: str) -> tuple:
         """解析预约时间和时长"""
         if not start_time_str or start_time_str == "未知":
@@ -28,9 +35,11 @@ class TechnicianFinder:
             start_time = time_config.parse_datetime(start_time_str)
             if start_time is None:
                 return None, None, None
-            
-            # 从字符串中提取数字作为时长（分钟）
-            duration_min = int(''.join(filter(str.isdigit, str(duration_str))))
+
+            # 优先提取数字（"60分钟"），失败时查中文口语映射（"一个半小时"）
+            digits = ''.join(filter(str.isdigit, str(duration_str)))
+            duration_min = int(digits) if digits else self.DURATION_CN_MAP.get(
+                str(duration_str).strip(), 0)
             if duration_min <= 0:
                 return None, None, None
 
@@ -122,27 +131,31 @@ class TechnicianFinder:
         return [all_techs[i] for i in indices]
     
     def filter_technicians_by_gender(self, all_techs: list, gender: str) -> list:
-        """根据性别筛选技师"""
+        """根据性别筛选技师
+
+        用户明确指定性别偏好时严格遵守：无匹配即返回空列表（由调用方提示用户），
+        不再静默回退为全部技师（避免女客户被安排男理疗师）。
+        """
         if not gender or gender == "未知" or gender == "无":
             return all_techs
-        
+
         # 标准化性别表示
         gender = gender.strip().lower()
-        if gender in ["男", "男性", "男技师", "male"]:
+        if gender in ["男", "男性", "男理疗师", "male"]:
             target_gender = "男"
-        elif gender in ["女", "女性", "女技师", "female"]:
+        elif gender in ["女", "女性", "女理疗师", "female"]:
             target_gender = "女"
         else:
             return all_techs
-        
+
         # 筛选匹配性别的技师
         filtered_techs = []
         for tech in all_techs:
             tech_gender = tech.get("gender", "").strip()
             if tech_gender == target_gender:
                 filtered_techs.append(tech)
-        
-        return filtered_techs if filtered_techs else all_techs  # 如果没有匹配的，返回所有技师
+
+        return filtered_techs
     
     def find_available_technician(self, filtered_techs: list, all_techs: list, 
                                 start_time: datetime, end_time: datetime, 
@@ -236,7 +249,11 @@ class TechnicianFinder:
         # 先根据性别筛选技师
         gender_filtered_techs = self.filter_technicians_by_gender(all_techs, gender)
         if yield_func and gender and gender != "未知":
-            yield_func(f"[THOUGHT][预约机器人] 根据性别'{gender}'筛选技师，找到{len(gender_filtered_techs)}位技师\n")
+            yield_func(f"[THOUGHT][预约机器人] 根据性别'{gender}'筛选理疗师，找到{len(gender_filtered_techs)}位理疗师\n")
+        if gender and gender not in ("未知", "无") and not gender_filtered_techs:
+            if yield_func:
+                yield_func(f"[THOUGHT][预约机器人] 没有找到符合性别偏好'{gender}'的理疗师\n")
+            return None
 
         # 再根据偏好筛选技师
         filtered_techs = self.filter_technicians_by_preference(gender_filtered_techs, preference)

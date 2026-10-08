@@ -3,7 +3,7 @@
 
 只保留第一版真正需要的核心功能
 """
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Any, Dict, Optional
 from datetime import datetime
 from config.time_config import time_config
@@ -12,7 +12,7 @@ from config.time_config import time_config
 class BaseResponse(BaseModel):
     """基础响应模型"""
     message: str
-    timestamp: datetime = time_config.now()
+    timestamp: datetime = Field(default_factory=time_config.now)
 
 
 class DataResponse(BaseResponse):

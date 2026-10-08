@@ -87,9 +87,11 @@ class WeatherTool(BaseTool):
         first = results[0]
         return first["latitude"], first["longitude"], first.get("name", city)
 
-    async def _get_weather_data(self, city: str = "北京") -> str:
-        """获取指定城市的当前天气（中文描述）"""
+    async def _get_weather_data(self, city: str = "") -> str:
+        """获取指定城市的当前天气（中文描述）；城市为空时返回兜底消息"""
         try:
+            if not city:
+                return FALLBACK_MESSAGE
             coords = await self._resolve_coordinates(city)
             if coords is None:
                 print(f"[WeatherTool] 未找到城市'{city}'，返回兜底消息")
@@ -123,10 +125,10 @@ class WeatherTool(BaseTool):
             print(f"[WeatherTool] 天气查询失败: {e}")
             return FALLBACK_MESSAGE
 
-    def _run(self, city: str = "北京") -> str:
+    def _run(self, city: str = "") -> str:
         """同步版本 - 不推荐使用"""
         return asyncio.run(self._get_weather_data(city))
 
-    async def _arun(self, city: str = "北京") -> str:
+    async def _arun(self, city: str = "") -> str:
         """异步版本"""
         return await self._get_weather_data(city)

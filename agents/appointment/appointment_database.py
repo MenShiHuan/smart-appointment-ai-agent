@@ -8,7 +8,6 @@
 from typing import Dict, Any
 from datetime import datetime
 from config.time_config import time_config
-from config.constants import busy_periods_dict
 
 
 class AppointmentDatabase:
@@ -56,16 +55,8 @@ class AppointmentDatabase:
             print(f"保存预约信息到数据库失败：{e}")
             return False
     
-    def update_memory_schedule(self, technician_id: str, start_time: datetime, end_time: datetime):
-        """更新内存中的技师忙碌时间段"""
-        busy_period = {
-            "start": time_config.format_datetime(start_time, "%H:%M"),
-            "end": time_config.format_datetime(end_time, "%H:%M")
-        }
-        busy_periods_dict.setdefault(technician_id, []).append(busy_period)
-    
     def _record_user_behavior(self, start_time: datetime, end_time: datetime,
-                            technician_id: str, appointment_history: Dict[str, Any], 
+                            technician_id: str, appointment_history: Dict[str, Any],
                             session_id: str):
         """记录用户预约行为"""
         try:
@@ -73,17 +64,17 @@ class AppointmentDatabase:
                 'start_time': time_config.format_datetime(start_time, "%Y-%m-%d %H:%M:%S"),
                 'end_time': time_config.format_datetime(end_time, "%Y-%m-%d %H:%M:%S"),
                 'duration': int((end_time - start_time).total_seconds() / 60),
-                'project': appointment_history.get('project', 'massage'),
+                'project': appointment_history.get('project', '未知'),
                 'preference': appointment_history.get('preference', ''),
                 'technician_id': technician_id
             }
-            
-            # 通过Services层记录用户行为
+
+            # 通过Services层记录用户行为（technician_id 列类型为 Integer，传 int）
             self.user_behavior_service.record_behavior(
                 user_id="default_user",  # 统一使用default_user作为用户ID
                 action_type='appointment',
                 action_data=action_data,
-                technician_id=str(technician_id),
+                technician_id=int(technician_id),
                 session_id=session_id
             )
             

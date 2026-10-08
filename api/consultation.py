@@ -17,11 +17,11 @@ router = APIRouter(prefix="/api/consultation", tags=["咨询服务"])
 async def ask_consultation(request: ConsultationRequest):
     """提交咨询问题"""
     try:
-        # 简化实现 - 直接导入需要的agent
-        from agents.consultant_agent import ConsultantAgent
-        agent = ConsultantAgent()
-        result = await agent.process_consultation(request.question)
-        
+        from api.chat_handler import task_agent
+
+        agent = task_agent.consultant_agent
+        result = await agent.consult(request.question)
+
         return DataResponse(
             message="咨询处理成功",
             data={"answer": result, "question": request.question}

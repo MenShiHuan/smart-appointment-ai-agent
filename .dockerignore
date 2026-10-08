@@ -1,0 +1,10 @@
+.venv
+__pycache__
+*.pyc
+.git
+data
+logs
+evals/report.md
+.pytest_cache
+.claude
+DEV_SPEC.md

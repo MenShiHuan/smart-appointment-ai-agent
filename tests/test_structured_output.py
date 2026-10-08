@@ -29,7 +29,7 @@ class FakeLLM:
         self.responses = list(responses)
         self.call_count = 0
 
-    def with_structured_output(self, schema):
+    def with_structured_output(self, schema, method=None):
         return None  # 模拟 provider 不支持结构化输出
 
     async def ainvoke(self, messages):
@@ -45,7 +45,7 @@ class FakeStructuredLLM:
     def __init__(self, result):
         self.result = result
 
-    def with_structured_output(self, schema):
+    def with_structured_output(self, schema, method=None):
         return self
 
     async def ainvoke(self, prompt_text):

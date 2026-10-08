@@ -10,6 +10,7 @@
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 from db.db_router import DatabaseRouter
+from config.time_config import time_config
 import logging
 
 logger = logging.getLogger(__name__)
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 class UserBehaviorService:
     """用户行为服务类"""
     
-    def __init__(self, db_path: str = 'sqlite:///data/smart_appointment.db'):
+    def __init__(self, db_path: str = None):
         self.db_router = DatabaseRouter(db_path)
         self.user_behavior_repo = self.db_router.user_behavior
     
@@ -59,15 +60,24 @@ class UserBehaviorService:
             logger.error(f"获取用户偏好失败：{e}")
             return []
     
-    def update_user_preference(self, user_id: str, preference_type: str, 
+    def update_user_preference(self, user_id: str, preference_type: str,
                              preference_value: str, confidence_score: int = 1) -> bool:
         """更新用户偏好"""
         try:
+            # repo 签名不含 confidence_score 参数，仅透传前三个必填参数
             return self.user_behavior_repo.update_user_preference(
-                user_id, preference_type, preference_value, confidence_score
+                user_id, preference_type, preference_value
             )
         except Exception as e:
             logger.error(f"更新用户偏好失败：{e}")
+            return False
+
+    def delete_user_preference(self, user_id: str, preference_type: str) -> bool:
+        """删除用户某类偏好"""
+        try:
+            return self.user_behavior_repo.delete_user_preference(user_id, preference_type)
+        except Exception as e:
+            logger.error(f"删除用户偏好失败：{e}")
             return False
     
     def analyze_user_patterns(self, user_id: str) -> Dict[str, Any]:
@@ -109,16 +119,24 @@ class UserBehaviorService:
         if len(appointment_behaviors) < 2:
             return {"frequency": "single_appointment", "days_between": 0}
         
-        # 计算平均间隔天数
+        # 计算平均间隔天数（created_at 口径：存储为 naive UTC，比较时统一转北京时间）
         dates = []
         for behavior in appointment_behaviors:
-            if 'created_at' in behavior:
-                try:
-                    date = datetime.fromisoformat(behavior['created_at'].replace('Z', '+00:00'))
-                    dates.append(date)
-                except:
+            created = behavior.get('created_at')
+            if created is None:
+                continue
+            try:
+                if isinstance(created, datetime):
+                    date = created
+                elif isinstance(created, str):
+                    date = datetime.fromisoformat(created.replace('Z', '+00:00'))
+                else:
                     continue
-        
+                dates.append(time_config.to_beijing(date))
+            except (ValueError, TypeError):
+                logger.warning(f"created_at 解析失败: {created!r}")
+                continue
+
         if len(dates) < 2:
             return {"frequency": "insufficient_data", "days_between": 0}
         

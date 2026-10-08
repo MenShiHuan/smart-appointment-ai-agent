@@ -47,7 +47,7 @@ graph TD
 - **长记忆偏好画像**：行为记录（预约/咨询）+ 后台整合任务（水位游标增量回放 → 结构化抽取 → 向量去重 → "频次×新近度"置信度更新，幂等可重试）；用户可查询自己的历史偏好（"我上次约的哪位理疗师"）。
 - **疗程回访**：结合偏好画像与理疗师空闲档期生成个性化回访消息（定时调度）。
 - **天气提醒**：预约成功后结合 Open-Meteo 实时天气（免费地理编码 + 天气 API，无需密钥）生成理疗后保暖提醒；天气服务不可用时优雅降级。
-- **领域词表配置**：`config/domain_terms.py` 集中管理领域词表（理疗版/按摩版），`DOMAIN` 环境变量一键切换，领域可迁移性是代码事实。
+- **领域词表配置**：`config/domain_terms.py` 集中管理领域词表（禁忌症、业务称谓、服务项目目录），提示词与消息文案统一引用，避免各处硬编码措辞不一致。
 - **模型混合部署**：对话与抽取用云端 DeepSeek（deepseek-chat），向量化用本地 Ollama + bge-m3（零成本、中文语义强）。
 - **评测流水线**：`evals/` 黄金评测集（意图分类 50 / 槽位抽取 30 / 咨询问答 40 / 端到端 10，含时间归一化、禁忌命中、档期冲突用例），一键产出报告，失败样本回灌回归。
 - **可观测性**：轻量 TraceContext 记录各阶段耗时与 Token 到 JSON Lines，`/metrics` 端点聚合。
@@ -130,11 +130,33 @@ python -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
 # 离线测试（无需 API Key、不联网）
 python -m pytest tests/
 
-# 评测流水线（需要 DeepSeek Key 与 bge-m3）
-python -m evals.run --suite all
+# 评测流水线（需要 DeepSeek Key 与 Ollama bge-m3；自动使用独立评测库，不碰生产数据）
+python -m evals.run --subset intent,slots,qa,e2e
+python -m evals.run --subset qa --limit 5     # 抽样小跑
+EVAL_KEEP_DB=1 python -m evals.run            # 保留评测库（默认每次重建）
 ```
 
 评测报告输出至 `evals/report.md`，包含意图路由准确率、槽位 Exact Match、咨询回答正确率、端到端成功率与 P95 延迟。
+
+### 最新评测指标（2026-10-08，evals/report.md）
+
+| 子集 | 通过/总数 | 准确率 |
+|---|---|---|
+| 意图分类 intent | 50/50 | 100.0% |
+| 槽位抽取 slots | 30/30 | 100.0% |
+| 咨询问答 qa | 40/40 | 100.0% |
+| 端到端 e2e | 10/10 | 100.0% |
+
+## 可观测性（F1）
+
+- **Trace**：阶段耗时与 Token 记录到 JSON Lines（`logs/traces.jsonl`）
+- **指标**：`GET /metrics` 返回进程内请求计数与阶段耗时统计
+
+## Docker 部署（F2）
+
+```bash
+docker compose up --build   # Embedding 走宿主机 Ollama（bge-m3），LLM 走 DeepSeek
+```
 
 ## 项目结构
 
@@ -172,4 +194,4 @@ smart-appointment-ai-agent-master/
 
 ---
 
-本项目为个人学习与求职实践项目，聚焦多智能体编排、会话可靠性、记忆与评测闭环的工程落地。
+本项目聚焦多智能体编排、会话可靠性、记忆与评测闭环的工程落地，为健康理疗门店提供从咨询到预约回访的一体化智能服务。

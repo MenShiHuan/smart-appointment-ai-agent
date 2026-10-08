@@ -91,14 +91,16 @@ class UserBehaviorAgent:
             if not preferences:
                 return None
             
-            # 计算距离上次预约的天数
+            # 计算距离上次预约的天数（DB 存储口径 naive UTC → 转北京时间比较）
             last_appointment = preferences.get('last_appointment_date')
             days_since_last = None
             if last_appointment:
                 from datetime import datetime
+                from config.time_config import time_config
                 if isinstance(last_appointment, str):
                     last_appointment = datetime.fromisoformat(last_appointment.replace('Z', '+00:00'))
-                days_since_last = (datetime.now() - last_appointment).days
+                last_appointment = time_config.to_beijing(last_appointment)
+                days_since_last = (time_config.now() - last_appointment).days
             
             return {
                 'favorite_technician_id': preferences.get('favorite_technician_id'),
@@ -135,7 +137,7 @@ class UserBehaviorAgent:
                 not analysis.get('favorite_technician_id')
                 and not analysis.get('favorite_service')
             ):
-                fallback = ("您目前还没有预约记录。完成首次预约后，"
+                fallback = ("您目前还没有预约记录，暂无预约记录可供查询。完成首次预约后，"
                             "我就能帮您记住偏好的理疗师和服务项目。")
                 yield "[THOUGHT][记忆机器人] 记忆机器人：我来查看您的历史偏好记录...\n"
                 yield "[REPLY][记忆机器人]"
@@ -192,7 +194,7 @@ class UserBehaviorAgent:
             analysis = self.get_user_analysis(user_id)
             if not analysis or not analysis.get('favorite_technician_id'):
                 self.logger.info("没有找到用户偏好数据，使用默认消息")
-                return "尊敬的Tom，您好！好久没见了，要不要预约一个按摩放松一下？"
+                return "尊敬的客户，您好！好久没见了，要不要预约一次理疗放松一下？"
             
             self.logger.info(f"用户分析数据: {analysis}")
             
@@ -201,7 +203,7 @@ class UserBehaviorAgent:
             
             tech_name = tech_info.get('name', '您偏爱的技师') if tech_info else '您偏爱的技师'
             tech_strength = tech_info.get('strength', '') if tech_info else ''
-            service = analysis.get('favorite_service', '按摩')
+            service = analysis.get('favorite_service', '理疗服务')
             duration = analysis.get('favorite_duration', 60)
             
             self.logger.info(f"技师信息: {tech_name}, 特长: {tech_strength}")
@@ -211,13 +213,13 @@ class UserBehaviorAgent:
             self.logger.info(f"格式化后的时间: {times_text}")
             
             # 构建LLM提示
-            prompt = f"""请为健康理疗店生成一条温暖的回访消息。
+            prompt = f"""请为健康理疗中心生成一条温暖的回访消息。
 
 客户信息：
-- 称呼：尊敬的Tom
+- 称呼：尊敬的客户
 - 最喜欢的理疗师：{tech_name}
 - 理疗师特长：{tech_strength}
-- 常用服务：{service.replace('按摩', '理疗')}
+- 常用服务：{service}
 - 常用时长：{duration}分钟
 - 理疗师空闲时间：{times_text}
 
@@ -309,6 +311,6 @@ class UserBehaviorAgent:
         except Exception as e:
             self.logger.error(f"获取提醒信息失败: {type(e).__name__}: {str(e)}")
             return {
-                "message": "尊敬的Tom，您好！系统暂时无法查询技师时间，请稍后再试或直接联系我们预约。",
+                "message": "尊敬的客户，您好！系统暂时无法查询理疗师时间，请稍后再试或直接联系我们预约。",
                 "technician_available_times": []
             }

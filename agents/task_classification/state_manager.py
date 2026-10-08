@@ -70,20 +70,6 @@ class StateManager:
         }
         return descriptions.get(state, "未知状态")
 
-    def can_transition_to(self, target_state: StateEnum) -> bool:
-        """检查是否可以转换到目标状态"""
-        current_state = self.get_current_state()
-
-        # 定义允许的状态转换
-        allowed_transitions = {
-            StateEnum.CLASSIFY: [StateEnum.APPOINTMENT, StateEnum.CONSULT, StateEnum.MEMORY],
-            StateEnum.APPOINTMENT: [StateEnum.CLASSIFY],
-            StateEnum.CONSULT: [StateEnum.CLASSIFY],
-            StateEnum.MEMORY: [StateEnum.CLASSIFY]
-        }
-
-        return target_state in allowed_transitions.get(current_state, [])
-    
     def force_reset(self) -> None:
         """强制重置状态（用于错误恢复）"""
         print("强制重置状态到分类状态")

@@ -1,0 +1,422 @@
+[
+  {
+    "id": "slot-001",
+    "input": "我想约明天下午2点，做个肩颈理疗，一个小时，要女理疗师",
+    "expected_slots": {
+      "start_time": "TOMORROW 14:00",
+      "duration": "60分钟",
+      "project": "肩颈理疗",
+      "gender": "女",
+      "technician_name": "未知",
+      "preference": "未知",
+      "unrelated": false
+    },
+    "note": "标准全字段抽取"
+  },
+  {
+    "id": "slot-002",
+    "input": "下周三上午十点帮我约个艾灸吧",
+    "expected_slots": {
+      "start_time": "WEDNESDAY_NEXT 10:00",
+      "duration": "未知",
+      "project": "艾灸",
+      "gender": "未知",
+      "technician_name": "未知",
+      "preference": "未知",
+      "unrelated": false
+    },
+    "note": "下周时间归一化 + 缺时长"
+  },
+  {
+    "id": "slot-003",
+    "input": "今天下午三点半，找张伟理疗师做腰部理疗",
+    "expected_slots": {
+      "start_time": "TODAY 15:30",
+      "duration": "未知",
+      "project": "腰部理疗",
+      "gender": "未知",
+      "technician_name": "张伟",
+      "preference": "未知",
+      "unrelated": false
+    },
+    "note": "指定理疗师姓名 + 今天时间"
+  },
+  {
+    "id": "slot-004",
+    "input": "后天晚上八点，全身放松理疗，一个半钟头，男理疗师",
+    "expected_slots": {
+      "start_time": "TOMORROW+1 20:00",
+      "duration": "90分钟",
+      "project": "全身放松理疗",
+      "gender": "男",
+      "technician_name": "未知",
+      "preference": "未知",
+      "unrelated": false
+    },
+    "note": "后天时间 + 90分钟换算"
+  },
+  {
+    "id": "slot-005",
+    "input": "今天天气怎么样",
+    "expected_slots": {
+      "start_time": "未知",
+      "duration": "未知",
+      "project": "未知",
+      "gender": "未知",
+      "technician_name": "未知",
+      "preference": "未知",
+      "unrelated": true
+    },
+    "note": "无关输入触发 unrelated"
+  },
+  {
+    "id": "slot-006",
+    "input": "下午三点做个足部理疗",
+    "expected_slots": {
+      "start_time": "TODAY 15:00",
+      "duration": "未知",
+      "project": "足部理疗",
+      "gender": "未知",
+      "technician_name": "未知",
+      "preference": "未知",
+      "unrelated": false
+    },
+    "note": "仅报模糊下午，默认今天"
+  },
+  {
+    "id": "slot-007",
+    "input": "帮我约李娜老师明天上午",
+    "expected_slots": {
+      "start_time": "TOMORROW 09:00",
+      "duration": "未知",
+      "project": "未知",
+      "gender": "未知",
+      "technician_name": "李娜",
+      "preference": "未知",
+      "unrelated": false
+    },
+    "note": "含姓名，缺具体项目"
+  },
+  {
+    "id": "slot-008",
+    "input": "明天下午来个疗程",
+    "expected_slots": {
+      "start_time": "TOMORROW 14:00",
+      "duration": "未知",
+      "project": "疗程",
+      "gender": "未知",
+      "technician_name": "未知",
+      "preference": "未知",
+      "unrelated": false
+    },
+    "note": "标准时间 + 泛化项目"
+  },
+  {
+    "id": "slot-009",
+    "input": "我想做个肩颈理疗",
+    "expected_slots": {
+      "start_time": "未知",
+      "duration": "未知",
+      "project": "肩颈理疗",
+      "gender": "未知",
+      "technician_name": "未知",
+      "preference": "未知",
+      "unrelated": false
+    },
+    "note": "只报项目，其余全未知"
+  },
+  {
+    "id": "slot-010",
+    "input": "下周三下午四点半",
+    "expected_slots": {
+      "start_time": "WEDNESDAY_NEXT 16:30",
+      "duration": "未知",
+      "project": "未知",
+      "gender": "未知",
+      "technician_name": "未知",
+      "preference": "未知",
+      "unrelated": false
+    },
+    "note": "只报时间"
+  },
+  {
+    "id": "slot-011",
+    "input": "尊贵的贵宾您好，我想预约明天上午十点钟的肩颈理疗项目，做满两个小时谢谢",
+    "expected_slots": {
+      "start_time": "TOMORROW 10:00",
+      "duration": "120分钟",
+      "project": "肩颈理疗",
+      "gender": "未知",
+      "technician_name": "未知",
+      "preference": "未知",
+      "unrelated": false
+    },
+    "note": "敬语长句 + 120分钟换算"
+  },
+  {
+    "id": "slot-012",
+    "input": "后天下午找李娜做艾灸，要女理疗师",
+    "expected_slots": {
+      "start_time": "TOMORROW+1 14:00",
+      "duration": "未知",
+      "project": "艾灸",
+      "gender": "女",
+      "technician_name": "李娜",
+      "preference": "未知",
+      "unrelated": false
+    },
+    "note": "姓名与性别同时提取"
+  },
+  {
+    "id": "slot-013",
+    "input": "今天晚上九点全身放松",
+    "expected_slots": {
+      "start_time": "TODAY 21:00",
+      "duration": "未知",
+      "project": "全身放松",
+      "gender": "未知",
+      "technician_name": "未知",
+      "preference": "未知",
+      "unrelated": false
+    },
+    "note": "晚间时段精确提取"
+  },
+  {
+    "id": "slot-014",
+    "input": "里疗明天下午两点",
+    "expected_slots": {
+      "start_time": "TOMORROW 14:00",
+      "duration": "未知",
+      "project": "理疗",
+      "gender": "未知",
+      "technician_name": "未知",
+      "preference": "未知",
+      "unrelated": false
+    },
+    "note": "错别字纠错提取"
+  },
+  {
+    "id": "slot-015",
+    "input": "随便帮我约个时间做足部",
+    "expected_slots": {
+      "start_time": "未知",
+      "duration": "未知",
+      "project": "足部",
+      "gender": "未知",
+      "technician_name": "未知",
+      "preference": "未知",
+      "unrelated": false
+    },
+    "note": "模糊指代时间"
+  },
+  {
+    "id": "slot-016",
+    "input": "明天中午十二点半",
+    "expected_slots": {
+      "start_time": "TOMORROW 12:30",
+      "duration": "未知",
+      "project": "未知",
+      "gender": "未知",
+      "technician_name": "未知",
+      "preference": "未知",
+      "unrelated": false
+    },
+    "note": "中午时段规范提取"
+  },
+  {
+    "id": "slot-017",
+    "input": "预约一个小时的艾灸",
+    "expected_slots": {
+      "start_time": "未知",
+      "duration": "60分钟",
+      "project": "艾灸",
+      "gender": "未知",
+      "technician_name": "未知",
+      "preference": "未知",
+      "unrelated": false
+    },
+    "note": "缺时间有项目和时长"
+  },
+  {
+    "id": "slot-018",
+    "input": "后天下午约张伟",
+    "expected_slots": {
+      "start_time": "TOMORROW+1 14:00",
+      "duration": "未知",
+      "project": "未知",
+      "gender": "未知",
+      "technician_name": "张伟",
+      "preference": "未知",
+      "unrelated": false
+    },
+    "note": "后天带技术员"
+  },
+  {
+    "id": "slot-019",
+    "input": "下周三全天全身放松",
+    "expected_slots": {
+      "start_time": "未知",
+      "duration": "未知",
+      "project": "全身放松",
+      "gender": "未知",
+      "technician_name": "未知",
+      "preference": "未知",
+      "unrelated": false
+    },
+    "note": "下周三模糊全天归一化"
+  },
+  {
+    "id": "slot-020",
+    "input": "今天下午随便来个男理疗师",
+    "expected_slots": {
+      "start_time": "TODAY 14:00",
+      "duration": "未知",
+      "project": "未知",
+      "gender": "男",
+      "technician_name": "未知",
+      "preference": "未知",
+      "unrelated": false
+    },
+    "note": "只带性别与模糊今天下午"
+  },
+  {
+    "id": "slot-021",
+    "input": "明天下午两点半做腰部理疗，时长半小时",
+    "expected_slots": {
+      "start_time": "TOMORROW 14:30",
+      "duration": "30分钟",
+      "project": "腰部理疗",
+      "gender": "未知",
+      "technician_name": "未知",
+      "preference": "未知",
+      "unrelated": false
+    },
+    "note": "30分钟短时长提取"
+  },
+  {
+    "id": "slot-022",
+    "input": "请问下周三可以约李娜吗",
+    "expected_slots": {
+      "start_time": "未知",
+      "duration": "未知",
+      "project": "未知",
+      "gender": "未知",
+      "technician_name": "李娜",
+      "preference": "未知",
+      "unrelated": false
+    },
+    "note": "下周三加技术员"
+  },
+  {
+    "id": "slot-023",
+    "input": "今天晚上八点半足疗",
+    "expected_slots": {
+      "start_time": "TODAY 20:30",
+      "duration": "未知",
+      "project": "足疗",
+      "gender": "未知",
+      "technician_name": "未知",
+      "preference": "未知",
+      "unrelated": false
+    },
+    "note": "今晚晚间精准时间"
+  },
+  {
+    "id": "slot-024",
+    "input": "找女理疗师做肩颈",
+    "expected_slots": {
+      "start_time": "未知",
+      "duration": "未知",
+      "project": "肩颈",
+      "gender": "女",
+      "technician_name": "未知",
+      "preference": "未知",
+      "unrelated": false
+    },
+    "note": "缺时间多属性"
+  },
+  {
+    "id": "slot-025",
+    "input": "后天上午九点",
+    "expected_slots": {
+      "start_time": "TOMORROW+1 09:00",
+      "duration": "未知",
+      "project": "未知",
+      "gender": "未知",
+      "technician_name": "未知",
+      "preference": "未知",
+      "unrelated": false
+    },
+    "note": "后天早晨时间"
+  },
+  {
+    "id": "slot-026",
+    "input": "做个六十分钟的艾灸",
+    "expected_slots": {
+      "start_time": "未知",
+      "duration": "60分钟",
+      "project": "艾灸",
+      "gender": "未知",
+      "technician_name": "未知",
+      "preference": "未知",
+      "unrelated": false
+    },
+    "note": "时长数字格式化"
+  },
+  {
+    "id": "slot-027",
+    "input": "麻烦安排张伟老师",
+    "expected_slots": {
+      "start_time": "未知",
+      "duration": "未知",
+      "project": "未知",
+      "gender": "未知",
+      "technician_name": "张伟",
+      "preference": "未知",
+      "unrelated": false
+    },
+    "note": "纯指定人员"
+  },
+  {
+    "id": "slot-028",
+    "input": "明天下午做个全身放松",
+    "expected_slots": {
+      "start_time": "TOMORROW 14:00",
+      "duration": "未知",
+      "project": "全身放松",
+      "gender": "未知",
+      "technician_name": "未知",
+      "preference": "未知",
+      "unrelated": false
+    },
+    "note": "常规明天下午项目"
+  },
+  {
+    "id": "slot-029",
+    "input": "今天天气真不错",
+    "expected_slots": {
+      "start_time": "未知",
+      "duration": "未知",
+      "project": "未知",
+      "gender": "未知",
+      "technician_name": "未知",
+      "preference": "未知",
+      "unrelated": true
+    },
+    "note": "闲聊无关测试"
+  },
+  {
+    "id": "slot-030",
+    "input": "下周三晚上七点，男理疗师做肩颈",
+    "expected_slots": {
+      "start_time": "WEDNESDAY_NEXT 19:00",
+      "duration": "未知",
+      "project": "肩颈",
+      "gender": "男",
+      "technician_name": "未知",
+      "preference": "未知",
+      "unrelated": false
+    },
+    "note": "多字段组合完整抽取"
+  }
+]

@@ -1,7 +1,8 @@
 """
-简化的API异常处理
+API 异常处理
 
-只保留第一版真正需要的核心功能
+统一错误响应格式：{"status": "error", "message": "..."}，
+前端按 result.message 读取错误信息。
 """
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -12,17 +13,29 @@ logger = logging.getLogger(__name__)
 
 class BusinessException(HTTPException):
     """业务逻辑异常"""
-    
-    def __init__(self, message: str):
-        super().__init__(status_code=400, detail=message)
+
+    def __init__(self, message: str, status_code: int = 400):
+        super().__init__(status_code=status_code, detail=message)
 
 
 async def api_exception_handler(request: Request, exc: BusinessException):
-    """API异常处理器"""
+    """业务异常处理器"""
     logger.error(f"业务异常: {exc.detail}")
     return JSONResponse(
         status_code=exc.status_code,
-        content={"error": exc.detail}
+        content={"status": "error", "message": exc.detail}
+    )
+
+
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """HTTP 异常处理器：统一错误格式（含 422 校验错误等）"""
+    detail = exc.detail
+    if isinstance(detail, list):
+        # Pydantic 校验错误列表 → 摘要字符串
+        detail = "; ".join(str(d.get("msg", d)) for d in detail if isinstance(d, dict))
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"status": "error", "message": str(detail)}
     )
 
 
@@ -32,8 +45,8 @@ async def general_exception_handler(request: Request, exc: Exception):
     error_detail = f"未处理异常: {str(exc)}"
     stack_trace = traceback.format_exc()
     logger.error(f"{error_detail}\n{stack_trace}")
-    
+
     return JSONResponse(
         status_code=500,
-        content={"error": "服务器内部错误"}
+        content={"status": "error", "message": "服务器内部错误"}
     )

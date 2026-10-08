@@ -41,7 +41,7 @@ class RecommendationService:
             # 通过用户行为服务分析用户模式并生成推荐
             # TODO: 实现基于用户行为的推荐逻辑
             recommendations = []
-            
+
             if recommendations:
                 logger.info(f"成功生成 {len(recommendations)} 条推荐:")
                 for rec in recommendations:
@@ -50,9 +50,34 @@ class RecommendationService:
             else:
                 logger.info("本次没有生成新的推荐")
                 return None
-                
+
         except Exception as e:
             logger.error(f"定时推荐生成任务失败: {str(e)}")
+            return None
+
+    _memory_service = None
+
+    def run_memory_integration_job(self) -> Optional[Dict[str, Any]]:
+        """离线记忆整合调度任务（C4a）：触发判定由 MemoryService 内部完成
+
+        MemoryService 进程级复用（每次新建会重复建 engine 与 LLM 客户端）。
+        """
+        try:
+            from services.memory_service import MemoryService
+            if RecommendationService._memory_service is None:
+                RecommendationService._memory_service = MemoryService()
+            logger.info("检查离线记忆整合触发条件...")
+            report = RecommendationService._memory_service.run_integration_job()
+            if report.get("triggered"):
+                logger.info(f"记忆整合完成: 处理行为 {report['processed_behaviors']} 条，"
+                            f"新建 {report['created']} / 合并 {report['merged']} / "
+                            f"降权 {report['downweighted']} / 退役 {report['retired']} / "
+                            f"固化 {report['promoted']}")
+            else:
+                logger.info(f"记忆整合未触发: {report.get('reason')}")
+            return report
+        except Exception as e:
+            logger.error(f"离线记忆整合任务失败: {str(e)}")
             return None
     
     def start_scheduler(self) -> bool:
@@ -62,14 +87,8 @@ class RecommendationService:
             return False
         
         try:
-            # 设置定时任务
-            # 每天9点、14点、19点检查并生成推荐
-            schedule.every().day.at("09:00").do(self.generate_recommendations_job)
-            schedule.every().day.at("14:00").do(self.generate_recommendations_job)
-            schedule.every().day.at("19:00").do(self.generate_recommendations_job)
-            
-            # 每2小时检查一次（用于测试，实际可根据需要调整）
-            schedule.every(2).hours.do(self.generate_recommendations_job)
+            # 每小时检查离线记忆整合触发条件（C4a）
+            schedule.every().hour.do(self.run_memory_integration_job)
             
             self.is_running = True
             

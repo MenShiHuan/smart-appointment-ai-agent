@@ -1,39 +1,51 @@
 """
 知识库管理API
 """
+import logging
 from fastapi import APIRouter, HTTPException
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/knowledge", tags=["知识库管理"])
 
 
+def _strip_embeddings(entries):
+    """剥离 embedding 向量字段（1024 维向量不应透出给前端）"""
+    if not entries:
+        return []
+    return [{k: v for k, v in doc.items() if k != "embedding"} for doc in entries]
+
+
 class KnowledgeItem(BaseModel):
-    id: int = None
-    question: str
-    answer: str
+    id: Optional[int] = None
+    content: str
     category: str = "general"
+    keywords: List[str] = []
 
 
 class SearchRequest(BaseModel):
     query: str
+    top_k: int = 3
+    category: Optional[str] = None
 
 
 @router.get("/")
 async def get_all_knowledge():
     """获取所有知识条目"""
     try:
-        from services.knowledge_service import KnowledgeService
-        knowledge_service = KnowledgeService()
+        from services.knowledge_service import get_knowledge_service
+        knowledge_service = get_knowledge_service()
         if not knowledge_service.initialized:
             await knowledge_service.initialize()
-        entries = knowledge_service.get_all_documents()
-        
+        entries = _strip_embeddings(knowledge_service.get_all_documents())
+
         # 安全获取categories，避免出错
         try:
             categories = knowledge_service.get_all_categories()
         except Exception as e:
-            print(f"获取categories失败: {e}")
+            logger.error(f"获取categories失败: {e}")
             categories = []
         
         return {
@@ -50,8 +62,8 @@ async def get_all_knowledge():
 async def get_knowledge(knowledge_id: int):
     """获取特定知识条目"""
     try:
-        from services.knowledge_service import KnowledgeService
-        knowledge_service = KnowledgeService()
+        from services.knowledge_service import get_knowledge_service
+        knowledge_service = get_knowledge_service()
         if not knowledge_service.initialized:
             await knowledge_service.initialize()
         entry = knowledge_service.get_document(knowledge_id)
@@ -59,7 +71,7 @@ async def get_knowledge(knowledge_id: int):
             raise HTTPException(status_code=404, detail="知识条目不存在")
         return {
             "status": "success",
-            "data": entry
+            "data": {k: v for k, v in entry.items() if k != "embedding"}
         }
     except HTTPException:
         raise
@@ -71,12 +83,15 @@ async def get_knowledge(knowledge_id: int):
 async def add_knowledge(item: KnowledgeItem):
     """添加新的知识条目"""
     try:
-        knowledge_service = await app.get_knowledge_service()
-        # 将问答组合成文档内容
-        content = f"问题: {item.question}\n答案: {item.answer}"
+        from services.knowledge_service import get_knowledge_service
+        knowledge_service = get_knowledge_service()
+        if not knowledge_service.initialized:
+            await knowledge_service.initialize()
+        # 直接以内容入库（内容即知识条目全文）
         result = await knowledge_service.add_document(
-            content=content,
-            category=item.category
+            content=item.content,
+            category=item.category,
+            keywords=item.keywords
         )
         return {
             "status": "success",
@@ -91,16 +106,15 @@ async def add_knowledge(item: KnowledgeItem):
 async def update_knowledge(knowledge_id: int, item: KnowledgeItem):
     """更新知识条目"""
     try:
-        from services.knowledge_service import KnowledgeService
-        knowledge_service = KnowledgeService()
+        from services.knowledge_service import get_knowledge_service
+        knowledge_service = get_knowledge_service()
         if not knowledge_service.initialized:
             await knowledge_service.initialize()
-        # 将问答组合成文档内容
-        content = f"问题: {item.question}\n答案: {item.answer}"
         result = await knowledge_service.update_document(
             doc_id=knowledge_id,
-            content=content,
-            category=item.category
+            content=item.content,
+            category=item.category,
+            keywords=item.keywords
         )
         if not result:
             raise HTTPException(status_code=404, detail="知识条目不存在")
@@ -119,8 +133,8 @@ async def update_knowledge(knowledge_id: int, item: KnowledgeItem):
 async def delete_knowledge(knowledge_id: int):
     """删除知识条目"""
     try:
-        from services.knowledge_service import KnowledgeService
-        knowledge_service = KnowledgeService()
+        from services.knowledge_service import get_knowledge_service
+        knowledge_service = get_knowledge_service()
         if not knowledge_service.initialized:
             await knowledge_service.initialize()
         result = await knowledge_service.delete_document(knowledge_id)
@@ -140,11 +154,11 @@ async def delete_knowledge(knowledge_id: int):
 async def search_knowledge(request: SearchRequest):
     """搜索知识库"""
     try:
-        from services.knowledge_service import KnowledgeService
-        knowledge_service = KnowledgeService()
+        from services.knowledge_service import get_knowledge_service
+        knowledge_service = get_knowledge_service()
         if not knowledge_service.initialized:
             await knowledge_service.initialize()
-        results = await knowledge_service.search(request.query)
+        results = await knowledge_service.search(request.query, top_k=request.top_k)
         return {
             "status": "success",
             "data": results,

@@ -114,7 +114,8 @@ class AgentRouter:
                 yield token
         except Exception as e:
             yield f"[ERROR]记忆查询失败: {str(e)}"
-            self.session.state.value = StateEnum.CLASSIFY
+        # 记忆查询为单轮任务：完成后回到分类状态，避免下一轮任意输入被当记忆查询
+        self.session.state.value = StateEnum.CLASSIFY
 
     async def handle_unsupported_task(self, category: str) -> AsyncGenerator[str, None]:
         """
@@ -126,7 +127,7 @@ class AgentRouter:
         Yields:
             str: 回复内容
         """
-        reply = "暂不支持该类型任务。请只询问和按摩、预约相关的问题。"
+        reply = "暂不支持该类型任务。请只询问和健康理疗、预约相关的问题。"
         yield "[REPLY][归类机器人]"
         for char in reply:
             yield char

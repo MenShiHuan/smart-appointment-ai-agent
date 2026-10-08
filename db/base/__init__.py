@@ -7,12 +7,20 @@ Database Base Module
 - 通用工具
 """
 
-from .session_manager import SessionManager
+from .session_manager import (
+    SessionManager,
+    get_session_manager,
+    resolve_db_path,
+    DEFAULT_DB_PATH,
+)
 from .interfaces import BaseTechnicianRepository, BaseKnowledgeRepository, BaseUserBehaviorRepository
 
 __all__ = [
     'SessionManager',
+    'get_session_manager',
+    'resolve_db_path',
+    'DEFAULT_DB_PATH',
     'BaseTechnicianRepository',
-    'BaseKnowledgeRepository', 
+    'BaseKnowledgeRepository',
     'BaseUserBehaviorRepository'
 ]

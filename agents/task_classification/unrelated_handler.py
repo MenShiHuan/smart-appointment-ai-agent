@@ -17,7 +17,7 @@ class UnrelatedHandler:
     """无关请求处理器 - 处理与业务无关的用户请求"""
 
     def __init__(self, state_manager: StateManager, session: Optional[SessionContext] = None,
-                 business_context: str = "推拿服务"):
+                 business_context: str = "健康理疗服务"):
         """
         初始化无关请求处理器
 
@@ -91,7 +91,7 @@ class UnrelatedHandler:
         if reply and reply not in self._default_replies:
             self._default_replies.append(reply)
 
-    def set_business_context(self, service_name: str = "推拿服务") -> None:
+    def set_business_context(self, service_name: str = "健康理疗服务") -> None:
         """设置业务上下文，自定义回复中的服务名称"""
         self._business_context = service_name
         self._default_replies = self._build_replies(service_name)

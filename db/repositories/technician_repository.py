@@ -204,12 +204,12 @@ class TechnicianRepository(BaseTechnicianRepository, BaseScheduleRepository):
     def is_technician_available(self, technician_id: int, start_time: datetime, end_time: datetime) -> bool:
         """
         检查技师在指定时间段是否可用
-        
+
         Args:
             technician_id: 技师ID
             start_time: 开始时间
             end_time: 结束时间
-            
+
         Returns:
             是否可用
         """
@@ -220,8 +220,38 @@ class TechnicianRepository(BaseTechnicianRepository, BaseScheduleRepository):
                 TechnicianSchedule.start_time < end_time,
                 TechnicianSchedule.end_time > start_time
             ).first()
-            
+
             return conflict is None
+
+    def save_appointment_if_available(self, technician_id: int, start_time: datetime,
+                                      end_time: datetime, status: str = "busy",
+                                      appointment_id: Optional[int] = None) -> Optional[int]:
+        """
+        同一事务内完成「冲突检查 + 排班落库」，杜绝检查与写入之间的双订竞态。
+
+        Returns:
+            新排班记录 ID；时段冲突时返回 None（不落库）
+        """
+        with self.session_manager.session_scope() as session:
+            conflict = session.query(TechnicianSchedule).filter(
+                TechnicianSchedule.technician_id == technician_id,
+                TechnicianSchedule.status == "busy",
+                TechnicianSchedule.start_time < end_time,
+                TechnicianSchedule.end_time > start_time
+            ).first()
+            if conflict is not None:
+                return None
+
+            schedule = TechnicianSchedule(
+                technician_id=technician_id,
+                start_time=start_time,
+                end_time=end_time,
+                status=status,
+                appointment_id=appointment_id
+            )
+            session.add(schedule)
+            session.flush()
+            return schedule.id
 
     def update_schedule_status(self, schedule_id: int, status: str, appointment_id: Optional[int] = None) -> bool:
         """

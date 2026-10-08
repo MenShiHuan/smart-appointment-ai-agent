@@ -1,0 +1,23 @@
+# 智能健康理疗预约与服务 Agent 平台（F2：单服务一键起）
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # DeepSeek（OpenAI 兼容）
+      MODEL_PROVIDER: deepseek
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: https://api.deepseek.com
+      LLM_MODEL: deepseek-chat
+      # 宿主机 Ollama bge-m3（Windows/macOS 用 host.docker.internal；Linux 用 172.17.0.1 或改 network_mode: host）
+      EMBEDDING_PROVIDER: ollama
+      EMBEDDING_BASE_URL: http://host.docker.internal:11434/v1
+      EMBEDDING_MODEL: bge-m3
+      DATABASE_URL: sqlite:////app/data/smart_appointment.db
+      CHECKPOINT_DB_PATH: /app/data/checkpoints.db
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

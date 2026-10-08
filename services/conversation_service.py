@@ -12,7 +12,7 @@ from db.db_router import DatabaseRouter
 class ConversationService:
     """会话消息服务"""
 
-    def __init__(self, db_path: str = 'sqlite:///data/smart_appointment.db'):
+    def __init__(self, db_path: str = None):
         self.db_router = DatabaseRouter(db_path)
 
     @property
