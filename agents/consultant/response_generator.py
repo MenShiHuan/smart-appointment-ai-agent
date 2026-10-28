@@ -10,7 +10,11 @@ from .prompt_builder import PromptBuilder
 
 
 class ResponseGenerator:
-    """响应生成器"""
+    """响应生成器
+
+    统一负责 [REPLY][咨询机器人] 协议标签：一次性与流式回复均在开头补一次
+    标签，流式路径按 token 逐块透出（真流式）。
+    """
     
     def __init__(self, llm: BaseChatModel):
         self.llm = llm
@@ -19,7 +23,10 @@ class ResponseGenerator:
     async def generate_response(self, user_input: str, knowledge_docs: list,
                                 memory_context: Optional[str] = None,
                                 therapist_context: Optional[str] = None) -> str:
-        """生成标准响应"""
+        """生成标准响应
+
+        一次性调用；异常时返回兜底错误话术，不抛异常。
+        """
         try:
             prompt = self.prompt_builder.build_consultation_prompt(
                 user_input, knowledge_docs, memory_context=memory_context,

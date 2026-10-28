@@ -2,45 +2,11 @@
 Database Module
 
 数据库模块，包含：
-- 数据模型定义
-- 数据访问对象 (Repository)
-- 数据库路由器
-- 会话管理
+- 数据模型定义（db/models.py）
+- 数据访问对象 Repository（db/repositories/）
+- 数据库路由器（db/db_router.py）
+- 会话管理（db/base/）
+
+包根不做再导出：使用方一律按子模块路径导入
+（from db.db_router import DatabaseRouter 等）。
 """
-
-from .db_router import DatabaseRouter, TechnicianDBRouter, KnowledgeDBRouter
-from .repositories import TechnicianRepository, KnowledgeRepository, UserBehaviorRepository, ConversationRepository
-from .base import SessionManager
-from .models import (
-    Base, Technician, TechnicianSchedule,
-    KnowledgeDocument, UserBehavior, UserPreference, UserRecommendation,
-    ConversationMessage
-)
-
-__all__ = [
-    # 主要入口
-    'DatabaseRouter',
-
-    # 兼容性路由器
-    'TechnicianDBRouter',
-    'KnowledgeDBRouter',
-
-    # Repository模式
-    'TechnicianRepository',
-    'KnowledgeRepository',
-    'UserBehaviorRepository',
-    'ConversationRepository',
-
-    # 基础设施
-    'SessionManager',
-
-    # 数据模型
-    'Base',
-    'Technician',
-    'TechnicianSchedule',
-    'KnowledgeDocument',
-    'UserBehavior',
-    'UserPreference',
-    'UserRecommendation',
-    'ConversationMessage'
-]

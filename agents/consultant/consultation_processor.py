@@ -14,7 +14,11 @@ _behavior_agent = None
 
 
 class ConsultationProcessor:
-    """咨询流程处理器"""
+    """咨询流程处理器
+
+    编排标准咨询链路：知识检索（top_k=6）→ 分层记忆召回（C4b）→
+    理疗师档案注入（E1）→ 响应生成 → 行为记录（D1）。
+    """
     
     def __init__(self, knowledge_retriever: KnowledgeRetriever,
                  consultation_classifier: ConsultationClassifier,
@@ -88,7 +92,11 @@ class ConsultationProcessor:
         return response
 
     async def process_consultation_stream(self, user_input: str, session_id: str) -> AsyncGenerator[str, None]:
-        """处理流式咨询"""
+        """处理流式咨询
+
+        回复逐 token 透出（真流式）；行为记录在流式结束后执行，
+        记录失败不影响已输出的回复内容。
+        """
         try:
             # 1. 检索知识（top_k=6：多意图问题需要更多上下文覆盖）
             knowledge_docs = await self.knowledge_retriever.search_knowledge(user_input, top_k=6)

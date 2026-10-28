@@ -98,6 +98,7 @@ def _seed_sessions(memory_service, sessions, technician_ids=None):
 # ============ 1. 触发条件判定 ============
 
 def test_trigger_requires_min_sessions(memory_service):
+    """触发门槛：会话数不足时不触发，达到下限后可触发"""
     now = utcnow()
     should, reason = memory_service.check_trigger(None, 3, now)
     assert should is False
@@ -108,6 +109,7 @@ def test_trigger_requires_min_sessions(memory_service):
 
 
 def test_trigger_requires_new_sessions_and_interval(memory_service):
+    """触发条件：新增会话不足或距上次整合不足 24h 不触发，两者同时满足才触发"""
     now = utcnow()
     wm = {"last_behavior_id": 10,
           "last_integration_at": now - timedelta(hours=12),
@@ -129,6 +131,7 @@ def test_trigger_requires_new_sessions_and_interval(memory_service):
 
 
 def test_run_not_triggered_when_below_threshold(memory_service):
+    """整合入口：低于会话门槛时整轮跳过，不产生水位"""
     _seed_sessions(memory_service, ["s1", "s2"])
     report = asyncio.run(memory_service.run_integration_if_due())
 
@@ -140,6 +143,7 @@ def test_run_not_triggered_when_below_threshold(memory_service):
 # ============ 3. 规则抽取 ============
 
 def test_rule_extraction_from_appointment():
+    """规则抽取：appointment 行为产出服务/时段/时长/理疗师/手法类型候选"""
     behavior = {"id": 1, "action_type": "appointment", "session_id": "s1",
                 "technician_id": 7,
                 "action_data": {"project": "肩颈理疗", "start_time": "2026-09-20 14:00",
@@ -159,6 +163,7 @@ def test_rule_extraction_from_appointment():
 # ============ 4. LLM 抽取 + 失败不阻塞 ============
 
 def test_llm_extraction_from_consultation(db_path, monkeypatch):
+    """LLM 抽取：consultation 行为经结构化输出抽取偏好并入库"""
     result = PreferenceExtractionResult(preferences=[
         ExtractedPreference(preference_type="service", content="足部理疗")])
     structured_llm = FakeStructuredLLM(result)
@@ -176,6 +181,7 @@ def test_llm_extraction_from_consultation(db_path, monkeypatch):
 
 
 def test_llm_extraction_failure_does_not_block(db_path, monkeypatch):
+    """LLM 不可用：规则抽取候选照常入库，仅丢弃咨询候选"""
     class RaisingLLM:
         def with_structured_output(self, schema, method=None):
             return None
@@ -200,6 +206,7 @@ def test_llm_extraction_failure_does_not_block(db_path, monkeypatch):
 # ============ 5/7. 去重合并 + 置信度固化 ============
 
 def test_dedupe_merge_and_promote(memory_service):
+    """去重合并与固化：相同文本合并证据与去重会话数，置信度达标后写 UserPreference"""
     _seed_sessions(memory_service, ["s1", "s2", "s3", "s4", "s5"])  # 全为肩颈理疗/下午/60分钟
 
     report = asyncio.run(memory_service.run_integration_if_due())
@@ -225,6 +232,7 @@ def test_dedupe_merge_and_promote(memory_service):
 # ============ 2/8. 幂等重跑 + 水位推进与断点续跑 ============
 
 def test_idempotent_rerun_and_watermark_resume(memory_service, monkeypatch):
+    """幂等与断点续跑：无新事件重跑不触发，新会话只回放水位之后的增量"""
     monkeypatch.setattr("config.memory_config.BATCH_SIZE", 2)  # 批粒度 2，验证逐批水位推进
     now = utcnow()
     _seed_sessions(memory_service, ["s1", "s2", "s3", "s4", "s5"])
@@ -258,6 +266,7 @@ def test_idempotent_rerun_and_watermark_resume(memory_service, monkeypatch):
 # ============ 6. 互斥类型冲突降权与退役 ============
 
 def test_conflict_downweight_and_retire(memory_service):
+    """互斥冲突：新值降权既有条目至退役，非互斥类型不受影响"""
     # 5 个会话，理疗师各不相同：每出现新理疗师即对既有条目降权
     # tech1：1 → 0.5 → 0.25 → 0.125 退役；tech2：1 → 0.5 → 0.25 → 0.125 退役
     _seed_sessions(memory_service, ["s1", "s2", "s3", "s4", "s5"],

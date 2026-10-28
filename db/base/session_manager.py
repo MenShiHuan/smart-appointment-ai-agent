@@ -1,3 +1,8 @@
+"""
+数据库会话管理
+
+SQLite 引擎创建、事务作用域管理与进程级共享单例（按 db_path 键控）。
+"""
 import os
 import threading
 from contextlib import contextmanager
@@ -5,6 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session
 from ..models import Base
 
+# 默认 SQLite 库文件（未配置 DATABASE_URL 时使用）
 DEFAULT_DB_PATH = 'sqlite:///data/smart_appointment.db'
 
 # 进程级 SessionManager 共享缓存：同一 db_path 只建一个 engine（含一次 create_all），
@@ -51,6 +57,7 @@ class SessionManager:
         self.db_path = resolve_db_path(db_path)
         # timeout 缓解 SQLite 写锁竞争（"database is locked"）
         self.engine = create_engine(self.db_path, connect_args={"timeout": 30})
+        # 建表（create_all 幂等：已存在的表不会重复创建）
         Base.metadata.create_all(self.engine)
         self.Session = scoped_session(sessionmaker(bind=self.engine))
 

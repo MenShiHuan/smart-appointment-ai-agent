@@ -1,4 +1,8 @@
-from dotenv import load_dotenv
+"""
+任务分类主控制器
+
+LLM 意图分类 + 按 session_id 的会话注册表隔离，并协调预约/咨询/记忆 Agent 的路由。
+"""
 from config.model_provider import create_chat_model
 from config.constants import StateEnum
 from agents.core.session import SessionContext, SessionRegistry
@@ -9,8 +13,6 @@ from .task_classification import (
     UnrelatedHandler,
     ClassificationProcessor
 )
-
-load_dotenv()
 
 
 class TaskClassificationAgent:
@@ -35,6 +37,7 @@ class TaskClassificationAgent:
         # 全局单例组件（无会话状态）
         self.task_classifier = TaskClassifier(self.llm)
         self.session_registry = SessionRegistry()
+        # 业务上下文文案：与兜底话术的评测集关键词“健康理疗”保持一致（见 nodes.make_unsupported_node）
         self.business_context = "健康理疗服务"
 
         # 设置回调函数

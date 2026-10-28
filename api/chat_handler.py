@@ -1,18 +1,20 @@
+"""
+聊天处理门面（API 层）
+
+薄门面：全局 Agent 单例、图构建/关闭、会话恢复与流式管线的实现均位于
+application/agent_runtime.py（Web&Application 层组装根）；本模块保留
+图状态缓存（_graph/_checkpointer/_graph_lock）并逐行委托。
+
+注：图状态必须留在本模块——离线测试通过 monkeypatch 本模块 _graph
+注入 stub 图，模块 setattr 直写字典不经过任何钩子。
+"""
 import asyncio
-import os
 
-from agents.task_classification_agent import TaskClassificationAgent
-from agents.appointment_agent import AppointmentAgent
-from agents.consultant_agent import ConsultantAgent
-from agents.user_behavior_agent import UserBehaviorAgent
-from config.constants import StateEnum
-
-# 无状态单例 Agent：所有会话状态按 session_id 隔离在 SessionRegistry 中
-# 四个智能体：意图分类（主控）、智能预约、知识咨询、长记忆偏好总结
-task_agent = TaskClassificationAgent(
-    AppointmentAgent(),
-    ConsultantAgent(),
-    UserBehaviorAgent()
+from application.agent_runtime import (
+    build_runtime_graph,
+    close_runtime_graph,
+    stream_user_input,
+    task_agent,
 )
 
 # LangGraph 编排图（B5：/chat 请求走图编排路径）
@@ -24,28 +26,24 @@ _checkpointer = None
 
 
 async def _get_graph():
+    """获取（懒加载）LangGraph 编排图
+
+    首次构建必须在事件循环内创建 SQLite checkpointer，因此延迟到首个请求执行；
+    双重检查 + 锁：并发首请求也不会重复构建图与 checkpointer。
+    """
     global _graph, _checkpointer
     if _graph is None:
         async with _graph_lock:
+            # 双重检查：抢到锁后再判空一次，避免并发重复构建
             if _graph is None:
-                from agents.graph import build_agent_graph, make_sqlite_checkpointer
-                # CHECKPOINT_DB_PATH 供评测隔离注入
-                db_path = os.environ.get("CHECKPOINT_DB_PATH", "data/checkpoints.db")
-                _checkpointer = await make_sqlite_checkpointer(db_path)
-                _graph = build_agent_graph(task_agent, checkpointer=_checkpointer)
+                _checkpointer, _graph = await build_runtime_graph(task_agent)
     return _graph
 
 
 async def close_graph_checkpointer():
     """关闭 checkpointer 的 aiosqlite 连接（进程退出前调用，避免挂起）"""
     global _checkpointer, _graph
-    if _checkpointer is not None:
-        try:
-            await _checkpointer.aconn.close()
-        except Exception:
-            pass
-        _checkpointer = None
-        _graph = None
+    _checkpointer, _graph = await close_runtime_graph(_checkpointer, _graph)
 
 
 def new_session_id() -> str:
@@ -60,38 +58,16 @@ async def ProcessUserInput_stream(user_input, session_id=None):
 
     请求经 LangGraph 图编排处理：意图分类 → 业务节点路由，
     档期冲突自愈回环、落库前确认、禁忌筛查均在图中生效。
-    """
-    from agents.graph import stream_graph_task
 
+    异步生成器：逐 token yield 给 /chat/stream 透传；每轮对话经
+    TraceContext 记录耗时与 token 数（写 logs/traces.jsonl 并聚合到 /metrics）。
+    """
     if not session_id:
         session_id = task_agent.session_registry.new_session_id()
 
     graph = await _get_graph()
-    config = {"configurable": {"thread_id": session_id}}
+    async for token in stream_user_input(graph, task_agent, user_input, session_id):
+        yield token
 
-    from services.trace import TraceContext
-    trace = TraceContext("graph_turn", session_id)
 
-    # C12：从 checkpoint 恢复预约槽位与会话状态（服务重启后会话可继续）
-    try:
-        checkpointer = getattr(graph, "checkpointer", None)
-        if checkpointer is not None:
-            snapshot = await checkpointer.aget(config)
-            values = snapshot.values if snapshot else {}
-            if values.get("appointment_history") or values.get("session_state"):
-                session = task_agent.session_registry.get_or_create(session_id)
-                if values.get("appointment_history"):
-                    session.appointment_history = values["appointment_history"]
-                if values.get("session_state"):
-                    try:
-                        session.state.value = StateEnum(values["session_state"])
-                    except ValueError:
-                        session.state.value = StateEnum.CLASSIFY
-    except Exception:
-        # 恢复失败不阻塞本轮处理
-        pass
-
-    with trace:
-        async for token in stream_graph_task(graph, user_input, session_id, config):
-            trace.count_tokens()
-            yield token
+__all__ = ["task_agent", "ProcessUserInput_stream", "close_graph_checkpointer", "new_session_id"]

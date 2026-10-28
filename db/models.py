@@ -1,7 +1,13 @@
+"""
+ORM 数据模型定义
+
+全部表结构与字段约束集中于此，供建表与各仓储层统一引用。
+"""
 from sqlalchemy import Column, Integer, Float, String, DateTime, ForeignKey, Text, JSON
 from sqlalchemy.orm import declarative_base, relationship
 from datetime import datetime, timezone
 
+# ORM 基类：全部模型表继承自此（create_all 按元数据建表）
 Base = declarative_base()
 
 
@@ -14,6 +20,7 @@ def utcnow():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 class Technician(Base):
+    """理疗师（技师）信息表"""
     __tablename__ = 'technicians'
     id = Column(Integer, primary_key=True)
     name = Column(String, unique=True)
@@ -22,6 +29,7 @@ class Technician(Base):
     schedules = relationship("TechnicianSchedule", back_populates="technician", cascade="all, delete-orphan")
 
 class TechnicianSchedule(Base):
+    """技师排班表：以时段与状态表示技师日程占用"""
     __tablename__ = 'technician_schedules'
     id = Column(Integer, primary_key=True)
     technician_id = Column(Integer, ForeignKey('technicians.id'))
@@ -32,6 +40,7 @@ class TechnicianSchedule(Base):
     technician = relationship("Technician", back_populates="schedules")
 
 class KnowledgeDocument(Base):
+    """知识库文档表：内容/分类/关键词/向量，is_active 为软删除标记"""
     __tablename__ = 'knowledge_documents'
     id = Column(Integer, primary_key=True)
     content = Column(Text, nullable=False)
@@ -42,7 +51,23 @@ class KnowledgeDocument(Base):
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
     is_active = Column(Integer, default=1)  # 软删除标记
 
+class PdfDocument(Base):
+    """PDF 文档注册表：离线入库链路状态机（pending/parsing/chunking/indexing/done/failed）
+
+    doc_id 为 SHA-256(原始文件名) 完整 hex（两级哈希 ID 策略的文档级标识），
+    同名重传即文档更新（注册表重置为 pending + Milvus 按 doc_id 清空重入库）。
+    """
+    __tablename__ = 'pdf_documents'
+    doc_id = Column(String, primary_key=True)
+    original_filename = Column(String, nullable=False)
+    status = Column(String, nullable=False, default='pending')
+    chunk_count = Column(Integer, default=0)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
 class UserBehavior(Base):
+    """用户行为流水表：预约/咨询/问询等行为事件（离线记忆整合的回放源）"""
     __tablename__ = 'user_behaviors'
     id = Column(Integer, primary_key=True)
     user_id = Column(String, nullable=False, default='default_user')  # 单用户场景使用默认用户ID
@@ -54,6 +79,7 @@ class UserBehavior(Base):
     technician = relationship("Technician")
 
 class UserPreference(Base):
+    """用户偏好表：按类型存偏好值，confidence_score 为置信度（出现次数）"""
     __tablename__ = 'user_preferences'
     id = Column(Integer, primary_key=True)
     user_id = Column(String, nullable=False, default='default_user')
@@ -63,6 +89,7 @@ class UserPreference(Base):
     last_updated = Column(DateTime, default=utcnow, onupdate=utcnow)
 
 class UserRecommendation(Base):
+    """用户推荐表：待发送推荐（技师推荐/回访提醒等），is_sent 标记发送状态"""
     __tablename__ = 'user_recommendations'
     id = Column(Integer, primary_key=True)
     user_id = Column(String, nullable=False, default='default_user')
@@ -92,7 +119,7 @@ class MemoryEntry(Base):
     user_id = Column(String, nullable=False, default='default_user', index=True)
     entry_type = Column(String, nullable=False)  # service/time_period/duration/technician/technician_type
     content = Column(Text, nullable=False)
-    embedding = Column(JSON, nullable=True)  # bge-m3 1024 维浮点向量
+    embedding = Column(JSON, nullable=True)  # text-embedding-v3 1024 维浮点向量
     importance = Column(Float, default=1.0)
     confidence = Column(Float, default=0.0)
     evidence_count = Column(Integer, default=1)

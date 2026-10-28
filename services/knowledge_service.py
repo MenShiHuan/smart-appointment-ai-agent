@@ -1,35 +1,29 @@
+"""
+知识库服务（RAG 重构）：SQLite 元数据 registry + Milvus 双向量混合检索
+
+- SQLite（KnowledgeDocument 表）：文本知识的元数据/内容 registry，web CRUD 数据源
+- Milvus：唯一向量库，单 Collection 承载 BM25 稀疏（内嵌 Function）+
+  DashScope 稠密（TEXTEMBEDDING Function）+ 语义精排（RERANK Function）
+
+对外契约与旧 FAISS 实现保持一致（方法签名/返回结构），
+API 层、咨询链路、评测链路无感切换。进程级单例共享同一 Milvus 客户端。
+"""
 # services/knowledge_service.py
 
 import asyncio
-import math
-import threading
-import numpy as np
-import faiss
-from typing import List, Dict, Tuple, Optional
-from db.db_router import DatabaseRouter
-from .text_embedding import embed_input
-
-
-async def _embed(text: str) -> list:
-    """嵌入计算放入线程池，避免同步 HTTP 调用阻塞事件循环"""
-    return await asyncio.to_thread(embed_input, text)
-from config import knowledge_config as kc
 import logging
+import threading
+from typing import List, Dict, Optional, Any
+
+from db.db_router import DatabaseRouter
+from services.vector_store import get_vector_store
+from config import vector_config as vc
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DB_PATH = "sqlite:///data/smart_appointment.db"
 
-
-def _normalize(vector: List[float]) -> List[float]:
-    """向量归一化：IndexFlatIP 内积在归一化后等价于余弦相似度（D1）"""
-    norm = math.sqrt(sum(v * v for v in vector)) or 1.0
-    return [v / norm for v in vector]
-
-
-# ============ 进程级单例（D1） ============
-# API 与咨询链路共享同一实例与索引：API 增删改后索引自动重建，
-# 修复"API 新增知识对在线咨询不生效直到重启"与"每请求全量重建索引"。
+# ============ 进程级单例 ============
+# API 与咨询链路共享同一实例与 Milvus 客户端：API 增删改后在线检索立即可见。
 _instance = None
 _instance_lock = threading.Lock()
 
@@ -46,18 +40,17 @@ def get_knowledge_service(db_path: Optional[str] = None) -> "KnowledgeService":
 
 
 class KnowledgeService:
-    """知识库服务类 - 结合数据库存储和向量检索"""
+    """知识库服务类 - SQLite 存储 + Milvus 双向量混合检索"""
 
     def __init__(self, db_path: str = None):
         # 使用统一的DatabaseRouter，符合架构设计
         self.db_router = DatabaseRouter(db_path)
         self.db = self.db_router.knowledge  # 通过router访问knowledge repository
-        self.index = None
-        self.document_ids = []  # 维护文档ID与索引位置的映射
+        self.vector_store = get_vector_store()
         self.initialized = False
-        # 初始化并发锁：多调用方同时 initialize 时只构建一次索引
+        # 初始化并发锁：多调用方同时 initialize 时只构建一次
         self._init_lock = asyncio.Lock()
-        
+
         # 默认知识库内容（健康理疗领域种子知识，正式内容以运营配置为准）
         self.default_knowledge = [
             {
@@ -149,216 +142,212 @@ class KnowledgeService:
                 "content": "足部理疗环节包括：足部清洁与放松、足底反射区按压、足部经络疏通与舒缓收尾，帮助调节气血运行、促进血液循环、缓解疲劳、改善睡眠，全程约45分钟。",
                 "category": "服务介绍",
                 "keywords": ["足部理疗", "环节", "包含", "流程", "足底", "反射区", "血液循环"]
-            },
-            {
-                "content": "腰部理疗主要针对腰部问题：可放松腰部肌肉群、缓解腰肌劳损不适，改善久坐劳累引起的腰部肌肉紧张、酸痛。全程约60分钟。",
-                "category": "服务介绍",
-                "keywords": ["腰部理疗", "腰肌劳损", "腰部肌肉", "放松", "久坐", "酸痛"]
             }
         ]
 
     async def initialize(self):
-        """初始化知识库服务（并发安全：多调用方同时初始化只构建一次）"""
+        """初始化知识库服务（并发安全：多调用方同时初始化只构建一次）
+
+        失败抛异常（app.py 快速失败语义）；成功后 initialized=True，幂等可重入。
+        """
         if self.initialized:
             return
         async with self._init_lock:
             if self.initialized:
                 return
-            try:
-                # 检查数据库中是否已有数据
-                existing_docs = self.db.get_all_documents()
+            # 向量库初始化（建集合/加载，Milvus 不可用在此抛错）
+            await self.vector_store.initialize()
 
-                if not existing_docs:
-                    logger.info("数据库为空，初始化默认知识库")
-                    await self._create_default_knowledge()
-                else:
-                    logger.info(f"从数据库加载了 {len(existing_docs)} 条知识")
+            existing_docs = self.db.get_all_documents()
+            if not existing_docs:
+                logger.info("数据库为空，初始化默认知识库")
+                await self._create_default_knowledge()
+            else:
+                logger.info(f"从数据库加载了 {len(existing_docs)} 条知识")
+                # 存量升级：FAISS 时代的文档在 Milvus 中缺失，按需回填
+                await self._backfill_text_docs(existing_docs)
 
-                # 构建向量索引
-                await self._build_vector_index()
-                self.initialized = True
-                logger.info("知识库服务初始化完成")
-
-            except Exception as e:
-                logger.error(f"知识库服务初始化失败: {e}")
-                raise
+            self.initialized = True
+            logger.info("知识库服务初始化完成")
 
     async def _create_default_knowledge(self):
-        """创建默认知识库"""
+        """创建默认知识库（SQLite 注册 + Milvus 双向量自动编码）"""
         for knowledge in self.default_knowledge:
             try:
-                # 生成嵌入向量
-                text_for_embedding = f"{knowledge['content']} {' '.join(knowledge['keywords'])}"
-                embedding = await _embed(text_for_embedding)
-                
-                # 保存到数据库
-                self.db.add_document(
+                doc_id = self.db.add_document(
                     content=knowledge['content'],
                     category=knowledge['category'],
                     keywords=knowledge['keywords'],
-                    embedding=embedding
                 )
+                chunk = self._text_chunk(doc_id, knowledge['content'], knowledge['category'])
+                await self.vector_store.upsert_chunks([chunk])
                 logger.debug(f"添加默认知识: {knowledge['content'][:50]}...")
-                
             except Exception as e:
                 logger.error(f"添加默认知识失败: {e}")
 
-    async def _build_vector_index(self):
-        """构建向量索引"""
+    async def _backfill_text_docs(self, existing_docs: List[Dict]):
+        """存量文本知识回填 Milvus（旧 FAISS 数据升级场景，幂等 upsert）"""
         try:
-            documents = self.db.get_all_documents()
-            if not documents:
-                logger.warning("没有文档可用于构建索引")
-                return
-
-            embeddings = []
-            self.document_ids = []
-            
-            for doc in documents:
-                if doc.get('embedding'):
-                    embeddings.append(doc['embedding'])
-                    self.document_ids.append(doc['id'])
-                else:
-                    # 如果没有嵌入向量，生成一个
-                    logger.warning(f"文档 {doc['id']} 缺少嵌入向量，正在生成...")
-                    text_for_embedding = f"{doc['content']} {' '.join(doc.get('keywords', []))}"
-                    embedding = await _embed(text_for_embedding)
-                    
-                    # 更新数据库
-                    self.db.update_document(doc['id'], embedding=embedding)
-                    
-                    embeddings.append(embedding)
-                    self.document_ids.append(doc['id'])
-
-            if embeddings:
-                # 创建FAISS索引（入库向量归一化：内积等价余弦相似度，D1）
-                embeddings_array = np.array(
-                    [_normalize(emb) for emb in embeddings]).astype('float32')
-                dimension = embeddings_array.shape[1]
-                self.index = faiss.IndexFlatIP(dimension)  # 内积相似度
-                self.index.add(embeddings_array)
-                logger.info(f"构建向量索引完成，包含 {len(embeddings)} 个向量")
-            else:
-                logger.warning("没有有效的嵌入向量，无法构建索引")
-
+            present_ids = await self.vector_store.get_doc_ids(doc_type="text")
         except Exception as e:
-            logger.error(f"构建向量索引失败: {e}")
-            raise
+            logger.error(f"查询向量库文本知识失败: {e}")
+            return
+        missing = [
+            d for d in existing_docs
+            if d.get("is_active") and f"text_{d['id']}" not in present_ids
+        ]
+        if not missing:
+            return
+        chunks = [self._text_chunk(d["id"], d["content"], d["category"]) for d in missing]
+        await self.vector_store.upsert_chunks(chunks)
+        logger.info(f"已回填 {len(chunks)} 条存量知识到向量库")
+
+    def _text_chunk(self, doc_id: int, content: str, category: str) -> Dict[str, Any]:
+        """文本知识条目 → Milvus chunk 字典（单条目单 chunk，seq=1）"""
+        return {
+            "id": f"text_{doc_id}_1",
+            "doc_id": f"text_{doc_id}",
+            "doc_type": "text",
+            "page_num": 0,
+            "chapter_title": category or "",
+            "category": category or "",
+            "content": content[:vc.CONTENT_MAX_CHARS],
+        }
 
     async def search(self, query: str, top_k: int = 3, category: str = None) -> List[Dict]:
-        """搜索相关文档（D1：归一化余弦分数 + 批量回查 + 相似度下限过滤）"""
-        if not self.initialized or self.index is None or not self.document_ids:
-            logger.warning("知识库服务未初始化或索引不可用")
+        """搜索相关文档（混合检索：BM25 稀疏 + DashScope 稠密 → RRF 融合 → 语义精排）
+
+        未初始化/异常返回空列表；结果按契约组装（文本知识含 SQLite 八字段，
+        PDF 分片含 page_num/chapter_title 等元数据），score 为精排分（降级时
+        为归一化 RRF 分），rank 从 1 起。
+        """
+        if not self.initialized:
+            logger.warning("知识库服务未初始化")
             return []
 
         try:
-            # 生成查询的嵌入向量（归一化，与入库口径一致）
-            query_embedding = _normalize(await _embed(query))
-            query_array = np.array([query_embedding]).astype('float32')
+            candidates = await self.vector_store.hybrid_search(
+                query, top_k=top_k, category=category
+            )
+            candidates = await self.vector_store.rerank(query, candidates)
 
-            # 向量搜索（多检索一些候选，为分类过滤留余量）
-            candidate_k = min(top_k * kc.CANDIDATE_MULTIPLIER, len(self.document_ids))
-            scores, indices = self.index.search(query_array, candidate_k)
+            # 精排分数下限（仅对精排成功的候选生效）
+            if vc.RERANK_MIN_SCORE:
+                candidates = [
+                    c for c in candidates
+                    if c.get("score_source") != "rerank" or c["score"] >= vc.RERANK_MIN_SCORE
+                ]
 
-            # 批量回查文档（一次 IN 查询，软删除文档自动过滤）
-            doc_ids = [self.document_ids[idx] for idx in indices[0]
-                       if 0 <= idx < len(self.document_ids)]
-            docs_by_id = self.db.get_documents_by_ids(doc_ids)
-
-            results = []
-            for score, idx in zip(scores[0], indices[0]):
-                if idx < 0 or idx >= len(self.document_ids):
-                    continue
-                score = float(score)
-                if score < kc.MIN_SIMILARITY:
-                    continue  # 相似度下限：无关候选不注入
-                doc_id = self.document_ids[idx]
-                doc = docs_by_id.get(doc_id)
-                if not doc:
-                    continue
-                if category and doc.get('category') != category:
-                    continue
-
-                doc = dict(doc)
-                doc['score'] = score
-                doc['rank'] = len(results) + 1
-                results.append(doc)
-
-                if len(results) >= top_k:
-                    break
-
-            return results
+            return self._enrich_results(candidates[:top_k])
 
         except Exception as e:
             logger.error(f"搜索知识库失败: {e}")
             return []
 
+    def _enrich_results(self, candidates: List[Dict]) -> List[Dict]:
+        """Milvus 命中 → 契约字典：文本知识从 SQLite 补齐八字段，PDF 分片构造精简字典"""
+        text_sql_ids = []
+        for c in candidates:
+            doc_id = str(c.get("doc_id") or "")
+            if c.get("doc_type") == "text" and doc_id.startswith("text_"):
+                try:
+                    text_sql_ids.append(int(doc_id[len("text_"):]))
+                except ValueError:
+                    pass
+        docs_by_id = self.db.get_documents_by_ids(text_sql_ids) if text_sql_ids else {}
+
+        results = []
+        rank = 0
+        for c in candidates:
+            if c.get("doc_type") == "text":
+                doc_id = str(c.get("doc_id") or "")
+                try:
+                    sql_id = int(doc_id[len("text_"):])
+                except ValueError:
+                    continue
+                repo = docs_by_id.get(sql_id)
+                if not repo:
+                    continue  # 软删除或已不存在
+                rank += 1
+                results.append({
+                    **repo,
+                    "score": c["score"],
+                    "rank": rank,
+                    "doc_id": doc_id,
+                    "doc_type": "text",
+                    "page_num": 0,
+                    "chapter_title": c.get("chapter_title") or repo.get("category", ""),
+                })
+            else:
+                rank += 1
+                results.append({
+                    "id": c["id"],
+                    "content": c.get("content", ""),
+                    "category": "",
+                    "keywords": [],
+                    "embedding": None,
+                    "created_at": None,
+                    "updated_at": None,
+                    "is_active": True,
+                    "score": c["score"],
+                    "rank": rank,
+                    "doc_id": c.get("doc_id"),
+                    "doc_type": c.get("doc_type", "pdf"),
+                    "page_num": c.get("page_num"),
+                    "chapter_title": c.get("chapter_title") or "",
+                })
+        return results
+
     async def add_document(self, content: str, category: str, keywords: List[str] = None) -> bool:
-        """添加新文档"""
+        """添加新文档（SQLite 注册 + Milvus 双向量自动编码，写后在线检索立即可见）"""
         try:
             if keywords is None:
                 keywords = []
-            
-            # 生成嵌入向量
-            text_for_embedding = f"{content} {' '.join(keywords)}"
-            embedding = await _embed(text_for_embedding)
-            
-            # 保存到数据库
-            doc_id = self.db.add_document(content, category, keywords, embedding)
-            
-            # 重建索引
-            await self._build_vector_index()
-            
+
+            doc_id = self.db.add_document(content, category, keywords)
+            chunk = self._text_chunk(doc_id, content, category)
+            await self.vector_store.upsert_chunks([chunk])
+
             logger.info(f"成功添加文档 {doc_id}: {content[:50]}...")
             return True
-            
+
         except Exception as e:
             logger.error(f"添加文档失败: {e}")
             return False
 
     async def update_document(self, doc_id: int, content: str = None, category: str = None, keywords: List[str] = None) -> bool:
-        """更新文档"""
+        """更新文档（SQLite 更新 + Milvus 幂等 upsert；chunk_id 确定性不变，
+        向量随 content 由 Function 重新生成）"""
         try:
-            # 如果更新了内容或关键词，需要重新生成嵌入向量
-            embedding = None
-            if content is not None or keywords is not None:
-                # 获取当前文档信息
-                current_doc = self.db.get_document(doc_id)
-                if not current_doc:
-                    return False
-                
-                # 使用新值或保持原值
-                final_content = content if content is not None else current_doc['content']
-                final_keywords = keywords if keywords is not None else current_doc.get('keywords', [])
-                
-                # 生成新的嵌入向量
-                text_for_embedding = f"{final_content} {' '.join(final_keywords)}"
-                embedding = await _embed(text_for_embedding)
-            
-            # 更新数据库
-            success = self.db.update_document(doc_id, content, category, keywords, embedding)
-            
-            if success and embedding is not None:
-                # 重建索引
-                await self._build_vector_index()
-            
+            current = self.db.get_document(doc_id)
+            if not current:
+                return False
+
+            success = self.db.update_document(doc_id, content, category, keywords)
+            if not success:
+                return False
+
+            final_content = content if content is not None else current['content']
+            final_category = category if category is not None else current['category']
+            chunk = self._text_chunk(doc_id, final_content, final_category)
+            await self.vector_store.upsert_chunks([chunk])
+
             return success
-            
+
         except Exception as e:
             logger.error(f"更新文档失败: {e}")
             return False
 
     async def delete_document(self, doc_id: int, soft_delete: bool = True) -> bool:
-        """删除文档"""
+        """删除文档（SQLite 软删除 + Milvus 按 doc_id 清除 chunk，即时生效）"""
         try:
             success = self.db.delete_document(doc_id, soft_delete)
-            
+
             if success:
-                # 重建索引
-                await self._build_vector_index()
-            
+                await self.vector_store.delete_by_doc_id(f"text_{doc_id}")
+
             return success
-            
+
         except Exception as e:
             logger.error(f"删除文档失败: {e}")
             return False

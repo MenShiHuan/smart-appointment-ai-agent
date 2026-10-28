@@ -464,17 +464,20 @@
 </head>
 <body>
     <div class="container">
+        <!-- 页面头部：标题与说明 -->
         <div class="header">
             <h2><i class="fas fa-brain"></i> 知识库管理系统</h2>
             <p>管理健康理疗知识库，测试智能检索功能</p>
         </div>
         
         <div class="content">
+            <!-- 标签页导航：概览 / 搜索测试 / 知识管理 / 添加知识 -->
             <div class="nav-tabs">
                 <button class="nav-tab active" onclick="showTab('overview')">📊 概览</button>
                 <button class="nav-tab" onclick="showTab('search')">🔍 搜索测试</button>
                 <button class="nav-tab" onclick="showTab('manage')">📝 知识管理</button>
                 <button class="nav-tab" onclick="showTab('add')">➕ 添加知识</button>
+                <button class="nav-tab" onclick="showTab('pdf')">📄 PDF 文档</button>
             </div>
         
         <!-- 概览标签页 -->
@@ -554,8 +557,28 @@
                 </form>
             </div>
         </div>
+
+        <!-- PDF 文档标签页 -->
+        <div id="pdf" class="tab-content">
+            <div class="search-section">
+                <h3>📄 PDF 文档入库</h3>
+                <p style="color:#666; margin-bottom: 15px;">上传 PDF 后由 MinerU 解析 → 结构感知切分 → Milvus 双向量入库；同名文件重传即更新。</p>
+                <div id="pdfAlert"></div>
+                <form id="pdfUploadForm">
+                    <div class="form-group">
+                        <label for="pdfFile">选择 PDF 文件：</label>
+                        <input type="file" id="pdfFile" class="form-control" accept=".pdf" required>
+                    </div>
+                    <button type="submit" class="btn btn-success">⬆️ 上传并入库</button>
+                    <button type="button" class="btn btn-secondary" onclick="loadPdfDocuments()">🔄 刷新列表</button>
+                </form>
+            </div>
+
+            <h3>📂 文档列表与入库状态</h3>
+            <div id="pdfDocumentList" class="loading">加载中...</div>
+        </div>
     </div>
-    
+
     <!-- 编辑模态框 -->
     <div id="editModal" class="modal">
         <div class="modal-content">
@@ -582,6 +605,7 @@
         </div>
     </div>
     
+    <!-- JS 脚本区：知识库增删改查、标签页切换与搜索结果渲染 -->
     <script>
         // HTML 转义：知识条目内容不可信，禁止直接插入 innerHTML（防存储型 XSS）
         function escapeHtml(text) {
@@ -600,6 +624,10 @@
             // 绑定表单提交事件
             document.getElementById('addKnowledgeForm').addEventListener('submit', handleAddKnowledge);
             document.getElementById('editKnowledgeForm').addEventListener('submit', handleEditKnowledge);
+            document.getElementById('pdfUploadForm').addEventListener('submit', handlePdfUpload);
+
+            // 加载 PDF 文档列表（含状态轮询）
+            loadPdfDocuments();
         });
         
         // 加载知识库数据
@@ -953,6 +981,120 @@
             }
         }
         
+        // ============ PDF 文档入库管理（MinerU → 切分 → Milvus） ============
+        let pdfPollTimer = null;
+
+        // 上传 PDF 并提交入库任务
+        async function handlePdfUpload(event) {
+            event.preventDefault();
+            const fileInput = document.getElementById('pdfFile');
+            if (!fileInput.files.length) {
+                showAlert('请选择 PDF 文件', 'error', 'pdfAlert');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            try {
+                const response = await fetch('/api/knowledge/pdf/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await response.json();
+                if (response.ok) {
+                    showAlert('PDF 上传成功，后台解析入库中', 'success', 'pdfAlert');
+                    fileInput.value = '';
+                    await loadPdfDocuments();
+                } else {
+                    showAlert(result.detail || result.message || '上传失败', 'error', 'pdfAlert');
+                }
+            } catch (error) {
+                console.error('PDF 上传失败:', error);
+                showAlert('上传失败', 'error', 'pdfAlert');
+            }
+        }
+
+        // 加载 PDF 文档列表与入库状态
+        async function loadPdfDocuments() {
+            try {
+                const response = await fetch('/api/knowledge/pdf/documents');
+                const data = await response.json();
+                renderPdfDocuments(data.documents || []);
+            } catch (error) {
+                console.error('加载 PDF 文档列表失败:', error);
+                document.getElementById('pdfDocumentList').innerHTML = '<div class="loading">加载失败</div>';
+            }
+        }
+
+        // 渲染 PDF 文档列表（有任务进行中则定时轮询状态）
+        function renderPdfDocuments(documents) {
+            const container = document.getElementById('pdfDocumentList');
+            if (documents.length === 0) {
+                container.innerHTML = '<div class="loading">暂无 PDF 文档</div>';
+                stopPdfPolling();
+                return;
+            }
+
+            const statusText = {
+                pending: '⏳ 排队中', parsing: '🔍 解析中', chunking: '✂️ 切分中',
+                indexing: '💾 入库中', done: '✅ 已完成', failed: '❌ 失败'
+            };
+            const html = documents.map(doc => `
+                <div class="knowledge-item">
+                    <div class="knowledge-content">📄 ${escapeHtml(doc.original_filename)}</div>
+                    <div class="knowledge-meta">
+                        <span class="category-badge">${escapeHtml(statusText[doc.status] || doc.status)}</span>
+                        <span>分片数: ${doc.chunk_count}</span>
+                        <span>更新: ${new Date(doc.updated_at).toLocaleString()}</span>
+                    </div>
+                    ${doc.error_message ? `<div class="knowledge-meta" style="color:#f5576c;">错误: ${escapeHtml(doc.error_message)}</div>` : ''}
+                    <div class="knowledge-actions">
+                        <button class="btn btn-danger" onclick="deletePdfDocument('${escapeHtml(doc.doc_id)}')">🗑️ 删除</button>
+                    </div>
+                </div>
+            `).join('');
+            container.innerHTML = `<div class="knowledge-list">${html}</div>`;
+
+            const running = documents.some(d => ['done', 'failed'].indexOf(d.status) === -1);
+            if (running) {
+                if (!pdfPollTimer) {
+                    pdfPollTimer = setInterval(loadPdfDocuments, 3000);
+                }
+            } else {
+                stopPdfPolling();
+            }
+        }
+
+        function stopPdfPolling() {
+            if (pdfPollTimer) {
+                clearInterval(pdfPollTimer);
+                pdfPollTimer = null;
+            }
+        }
+
+        // 删除 PDF 文档（清空 Milvus 全部 chunk + 注册记录）
+        async function deletePdfDocument(docId) {
+            if (!confirm('确定要删除该 PDF 文档及其全部已入库分片吗？')) {
+                return;
+            }
+            try {
+                const response = await fetch(`/api/knowledge/pdf/documents/${encodeURIComponent(docId)}`, {
+                    method: 'DELETE'
+                });
+                const result = await response.json();
+                if (response.ok) {
+                    showAlert('PDF 文档删除成功', 'success');
+                    await loadPdfDocuments();
+                } else {
+                    showAlert(result.detail || result.message || '删除失败', 'error');
+                }
+            } catch (error) {
+                console.error('删除 PDF 文档失败:', error);
+                showAlert('删除失败', 'error');
+            }
+        }
+
         // 显示提示信息
         function showAlert(message, type, containerId = null) {
             const alertClass = type === 'success' ? 'alert-success' : 'alert-error';
@@ -983,34 +1125,5 @@
         }
     </script>
     </div>
-</body>
-</html>
-            const alertClass = type === 'success' ? 'alert-success' : 'alert-error';
-            const alertHtml = `<div class="alert ${alertClass}">${message}</div>`;
-            
-            if (containerId) {
-                document.getElementById(containerId).innerHTML = alertHtml;
-            } else {
-                // 在页面顶部显示
-                const container = document.querySelector('.container');
-                const alertDiv = document.createElement('div');
-                alertDiv.innerHTML = alertHtml;
-                container.insertBefore(alertDiv, container.firstChild);
-                
-                // 3秒后自动消失
-                setTimeout(() => {
-                    alertDiv.remove();
-                }, 3000);
-            }
-        }
-        
-        // 点击模态框外部关闭
-        window.onclick = function(event) {
-            const modal = document.getElementById('editModal');
-            if (event.target === modal) {
-                closeEditModal();
-            }
-        }
-    </script>
 </body>
 </html>

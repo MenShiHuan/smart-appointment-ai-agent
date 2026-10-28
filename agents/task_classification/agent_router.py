@@ -10,6 +10,7 @@
 from typing import Any, AsyncGenerator
 from agents.core.session import SessionContext
 from config.constants import StateEnum
+from config.domain_terms import FALLBACK_UNSUPPORTED_TASK
 
 
 class AgentRouter:
@@ -49,6 +50,7 @@ class AgentRouter:
         self.session.state.value = StateEnum.APPOINTMENT
 
         # 生成思考提示
+        # [THOUGHT] 思考提示 token：话术需与 graph/nodes.py 的 THOUGHTS 保持一致
         yield "[THOUGHT][归类机器人] 归类机器人：我发现这是一个预约任务，我将转给预约机器人处理。"
 
         # 调用预约Agent
@@ -57,6 +59,7 @@ class AgentRouter:
                 yield token
         except Exception as e:
             yield f"[ERROR]预约处理失败: {str(e)}"
+            # 失败降级：重置状态机回分类态，避免会话卡死在预约流程
             self.session.state.value = StateEnum.CLASSIFY
 
     async def route_to_consultation(self, task: str) -> AsyncGenerator[str, None]:
@@ -86,6 +89,7 @@ class AgentRouter:
                     yield token
         except Exception as e:
             yield f"[ERROR]咨询处理失败: {str(e)}"
+            # 失败降级：重置状态机回分类态，避免会话卡死在咨询流程
             self.session.state.value = StateEnum.CLASSIFY
 
     async def route_to_memory(self, task: str) -> AsyncGenerator[str, None]:
@@ -127,8 +131,11 @@ class AgentRouter:
         Yields:
             str: 回复内容
         """
-        reply = "暂不支持该类型任务。请只询问和健康理疗、预约相关的问题。"
+        # 兜底话术与 graph/nodes.py 的 unsupported 节点共用领域词表常量（评测集关键词：暂不支持 + 健康理疗）
+        reply = FALLBACK_UNSUPPORTED_TASK
+        # [REPLY] 前缀标识回复正文，前端按前缀区分展示类型
         yield "[REPLY][归类机器人]"
+        # 逐字符产出模拟流式打字效果（与 LLM 流式输出形态一致）
         for char in reply:
             yield char
 
@@ -143,6 +150,7 @@ class AgentRouter:
             str: 流式响应内容
         """
         state = self.session.state.value
+        # 续流路由：会话已在业务流中，按状态机直接分发，不再发 [THOUGHT] 分类提示
         if state == StateEnum.APPOINTMENT:
             async for token in self.appointment_agent.run_stream(user_input=task, session=self.session):
                 yield token

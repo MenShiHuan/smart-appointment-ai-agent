@@ -1,10 +1,12 @@
 """
 UserBehavior Module
 
-提供用户行为分析相关的核心组件（简化版）：
+提供用户行为分析相关的核心组件：
 - BehaviorRecorder: 行为记录器 - 记录用户操作行为
 - PatternAnalyzer: 模式分析器 - 分析用户行为模式和生成回访提醒
 - PreferenceManager: 偏好管理器 - 管理用户偏好数据
+
+（原 memory_extractor 已移至 services/memory_extractor.py，属 Services 层）
 """
 
 from .behavior_recorder import BehaviorRecorder

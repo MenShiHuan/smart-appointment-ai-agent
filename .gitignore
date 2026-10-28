@@ -27,6 +27,7 @@ ENV/
 
 # --- Data & runtime artifacts ---
 data/
+milvus-data/
 *.sqlite
 *.sqlite3
 *.db

@@ -10,7 +10,6 @@
 设计口径见 DEV_SPEC 2.6 / 2.6.1。
 """
 import asyncio
-import math
 import threading
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -18,20 +17,12 @@ from typing import Any, Dict, List, Optional
 from config import memory_config as mc
 from config.model_provider import create_chat_model
 from db.db_router import DatabaseRouter
-from services.text_embedding import embed_input
-from agents.user_behavior.memory_extractor import (
+from services.text_embedding import embed_input, normalize_vector
+from services.memory_extractor import (
     ConsultationExtractor,
     PreferenceCandidate,
     extract_from_behavior,
 )
-
-DEFAULT_DB_PATH = "sqlite:///data/smart_appointment.db"
-
-
-def _normalize(vector: List[float]) -> List[float]:
-    """向量归一化（余弦相似度前置）"""
-    norm = math.sqrt(sum(v * v for v in vector)) or 1.0
-    return [v / norm for v in vector]
 
 
 class MemoryService:
@@ -103,6 +94,7 @@ class MemoryService:
 
     async def _run_integration(self, user_id: str, watermark: Optional[Dict[str, Any]],
                                session_count: int, now: datetime) -> Dict[str, Any]:
+        """整合主流程：增量回放行为事件 → 抽候选 → 应用；水位按批推进（批粒度幂等）"""
         stats = {"created": 0, "merged": 0, "downweighted": 0,
                  "retired": 0, "promoted": 0, "candidates": 0}
         processed = 0
@@ -140,7 +132,8 @@ class MemoryService:
 
     def _apply_candidate(self, user_id: str, candidate: PreferenceCandidate,
                          now: datetime, stats: Dict[str, int]) -> None:
-        embedding = _normalize(embed_input(candidate.content))
+        """单候选应用：向量相似度去重 → 达阈值合并，否则新建（互斥类型新建后对旧条目冲突降权）"""
+        embedding = normalize_vector(embed_input(candidate.content))
         active_entries = self.memory_repo.get_active_entries(user_id, candidate.entry_type)
 
         best_entry = None
@@ -148,7 +141,7 @@ class MemoryService:
         for entry in active_entries:
             if not entry.get("embedding"):
                 continue
-            sim = self.cosine_similarity(embedding, _normalize(entry["embedding"]))
+            sim = self.cosine_similarity(embedding, normalize_vector(entry["embedding"]))
             if sim > best_sim:
                 best_sim, best_entry = sim, entry
 
@@ -162,6 +155,7 @@ class MemoryService:
     def _merge_candidate(self, user_id: str, entry: Dict[str, Any],
                          candidate: PreferenceCandidate, embedding: List[float],
                          now: datetime, stats: Dict[str, int]) -> None:
+        """合并证据：证据次数 +1、置信度按跨会话数重算；达固化阈值则写 UserPreference"""
         updated = self.memory_repo.merge_entry(entry["id"], candidate.session_id)
         distinct_sessions = updated["distinct_sessions"]
         confidence = self.compute_confidence(distinct_sessions, days_since_evidence=0)
@@ -180,6 +174,7 @@ class MemoryService:
     def _create_candidate(self, user_id: str, candidate: PreferenceCandidate,
                           embedding: List[float], now: datetime,
                           stats: Dict[str, int]) -> None:
+        """新建条目（置信度按单会话起步）；达固化阈值立即固化"""
         confidence = self.compute_confidence(distinct_sessions=1, days_since_evidence=0)
         entry_id = self.memory_repo.create_entry(
             user_id, candidate.entry_type, candidate.content,
@@ -248,7 +243,7 @@ class MemoryService:
         if not entries:
             return []
 
-        query_emb = _normalize(embed_input(query))
+        query_emb = normalize_vector(embed_input(query))
         now = datetime.utcnow()
 
         scored = []
@@ -256,9 +251,10 @@ class MemoryService:
             semantic = 0.0
             if entry.get("embedding"):
                 semantic = max(
-                    0.0, self.cosine_similarity(query_emb, _normalize(entry["embedding"])))
+                    0.0, self.cosine_similarity(query_emb, normalize_vector(entry["embedding"])))
 
             last_at = entry.get("last_evidence_at")
+            # 无证据时间的异常条目：时效分按 999 天衰减至 0
             days_since = max((now - last_at).days, 0) if last_at else 999
             recency = mc.CONFIDENCE_DECAY_PER_DAY ** days_since
             importance = min(entry.get("importance") or 0.0, 1.0)
@@ -289,6 +285,9 @@ class MemoryService:
 
 if __name__ == "__main__":
     # 手动触发入口：python -m services.memory_service
+    # 直跑入口需自加载 .env（服务模式由 app.py 统一加载）
+    from dotenv import load_dotenv
+    load_dotenv()
     service = MemoryService()
     report = service.run_integration_job()
     print("整合结果:", report)

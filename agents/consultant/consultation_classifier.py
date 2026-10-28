@@ -9,7 +9,11 @@ from .prompt_builder import PromptBuilder
 
 
 class ConsultationClassifier:
-    """咨询分类器"""
+    """咨询分类器
+
+    基于 LLM 的二分类（YES/NO）；分类异常时默认视为咨询相关，
+    避免误拒用户问题（宁可多答不漏答）。
+    """
     
     def __init__(self, llm: BaseChatModel):
         self.llm = llm

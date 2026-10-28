@@ -45,6 +45,7 @@ def test_distinct_sessions_do_not_share_state(registry):
 
 
 def test_same_session_id_returns_same_context(registry):
+    """同一 session_id 复用同一会话上下文（单例语义）"""
     ctx1 = registry.get_or_create("session-a")
     ctx2 = registry.get_or_create("session-a")
     assert ctx1 is ctx2
@@ -89,6 +90,7 @@ def test_restored_context_does_not_duplicate_messages(registry, db_url):
 
 
 def test_unrelated_reply_rotation_is_per_session(registry):
+    """无关回复轮换索引按会话隔离"""
     ctx1 = registry.get_or_create("session-a")
     ctx2 = registry.get_or_create("session-b")
     ctx1.unrelated_reply_index = 5
@@ -96,5 +98,6 @@ def test_unrelated_reply_rotation_is_per_session(registry):
 
 
 def test_new_session_id_is_unique(registry):
+    """批量生成 100 个新会话 id 均不重复"""
     ids = {registry.new_session_id() for _ in range(100)}
     assert len(ids) == 100

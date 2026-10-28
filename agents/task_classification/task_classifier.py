@@ -26,6 +26,7 @@ class TaskClassifier:
 
     def _initialize_prompt(self):
         """初始化分类提示词模板"""
+        # 四分类边界提示词：LLM 只允许输出四类英文名，越界由 classify_task 兜底为 other
         self.prompt = PromptTemplate(
             input_variables=["task"],
             template=(
@@ -66,6 +67,7 @@ class TaskClassifier:
         """
         try:
             category_msg = await self.chain.ainvoke({"task": task})
+            # 归一化 LLM 输出：容错大小写与首尾空白
             category = category_msg.content.strip().lower()
 
             # 验证分类结果是否有效

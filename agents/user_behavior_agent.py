@@ -9,11 +9,8 @@
 
 import logging
 from typing import Dict, Any, Optional
-from dotenv import load_dotenv
 from config.model_provider import create_chat_model
 from .user_behavior import PatternAnalyzer, BehaviorRecorder, PreferenceManager
-
-load_dotenv()
 
 
 class UserBehaviorAgent:
@@ -209,6 +206,7 @@ class UserBehaviorAgent:
             self.logger.info(f"技师信息: {tech_name}, 特长: {tech_strength}")
             
             # 格式化可用时间
+            # 最多提及 3 个空闲时段，控制消息长度（与 get_reminder_with_schedule 的 3 条上限一致）
             times_text = "、".join([t["formatted"] for t in (available_times or [])[:3]]) if available_times else "暂时没有空闲时间"
             self.logger.info(f"格式化后的时间: {times_text}")
             
@@ -269,11 +267,13 @@ class UserBehaviorAgent:
             today = datetime.now()
             available_times = []
             
-            # 检查今天从当前时间到晚上22点的空闲时段
+            # 检查今天从当前时间到晚上22点的空闲时段（营业时间口径统一走 time_config）
+            from config.time_config import time_config
+            open_hour, close_hour = time_config.get_business_hours()
             current_hour = datetime.now().hour
-            start_hour = max(current_hour + 1, 9)  # 从下一小时开始，但不早于9点
-            
-            for hour in range(start_hour, 22):  # 9点到22点营业时间
+            start_hour = max(current_hour + 1, open_hour)  # 从下一小时开始，但不早于开门时间
+
+            for hour in range(start_hour, close_hour):  # 开门到关门时段
                 check_time = today.replace(hour=hour, minute=0, second=0, microsecond=0)
                 end_time = check_time + timedelta(minutes=duration)
                 
@@ -287,7 +287,7 @@ class UserBehaviorAgent:
             # 如果今天没有空闲时间，检查明天
             if not available_times:
                 tomorrow = today + timedelta(days=1)
-                for hour in range(9, 22):  # 9点到22点营业时间
+                for hour in range(open_hour, close_hour):  # 开门到关门时段
                     check_time = tomorrow.replace(hour=hour, minute=0, second=0, microsecond=0)
                     end_time = check_time + timedelta(minutes=duration)
                     

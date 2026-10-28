@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>智能预约助手 - AI聊天机器人</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <!-- 内联样式区：聊天界面布局、气泡样式与响应式适配 -->
     <style>
         * {
             margin: 0;
@@ -445,6 +446,7 @@
             </form>
         </div>
     </div>
+    <!-- JS 脚本区：流式接收 /chat/stream 并渲染消息、会话 ID 管理与清空对话 -->
     <script>
     const chatBox = document.getElementById('chat-box');
     const chatForm = document.getElementById('chat-form');

@@ -4,6 +4,11 @@ FastAPI应用程序
 主应用程序入口，配置中间件、路由和异常处理
 自动初始化知识库和技师数据
 """
+from dotenv import load_dotenv
+
+# api key 唯一来源 .env：必须在一切项目 import（config 各模块 import 期读取 env）之前加载
+load_dotenv()
+
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -54,6 +59,7 @@ async def initialize_system():
 
     except Exception as e:
         logger.error(f"❌ 系统初始化失败: {e}")
+        # 初始化失败直接向上抛出：快速失败，避免应用带病启动
         raise
 
 def create_app() -> FastAPI:

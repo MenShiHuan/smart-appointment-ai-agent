@@ -31,6 +31,7 @@ BASE = datetime(2026, 9, 24, 12, 34, 0)
     ("NEXT_MONTH 10:00", None),                     # 不支持的表达式 → None
 ])
 def test_resolve_relative_time(expr, expected):
+    """基准注入下相对时间表达式解析结果与期望一致（不支持/未知返回 None）"""
     result = resolve_relative_time(expr, now=BASE)
     if expected is None:
         assert result is None

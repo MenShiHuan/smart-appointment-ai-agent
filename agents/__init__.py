@@ -1,14 +1,7 @@
-from .appointment_agent import AppointmentAgent
-from .consultant_agent import ConsultantAgent
-from .task_classification_agent import TaskClassificationAgent
-from .user_behavior_agent import UserBehaviorAgent
-from config.constants import SharedState, StateEnum
+"""
+Agents 包：预约/咨询/任务分类/用户行为四类 Agent 及 LangGraph 编排、会话上下文
 
-__all__ = [
-    'AppointmentAgent',
-    'ConsultantAgent', 
-    'TaskClassificationAgent',
-    'UserBehaviorAgent',
-    'SharedState',
-    'StateEnum'
-]
+包根不做再导出：使用方一律按子模块路径导入
+（from agents.appointment_agent import AppointmentAgent 等），
+避免包根急切导入连带构造 LLM 客户端。
+"""

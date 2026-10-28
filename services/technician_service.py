@@ -1,3 +1,4 @@
+"""技师服务：默认技师种子初始化、种子档案定向迁移（E1 配套）与排班查询封装"""
 # utils/ai/technician_service.py
 
 from typing import List, Dict, Any
@@ -82,6 +83,7 @@ class TechnicianService:
 
     def initialize_default_technicians(self) -> bool:
         """初始化默认技师数据"""
+        # 库中已有技师时不做覆盖，仅执行种子专长迁移检查
         try:
             # 检查是否已有技师数据
             existing_technicians = self.db.technicians.get_all_technicians()

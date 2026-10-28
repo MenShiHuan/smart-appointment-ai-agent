@@ -86,6 +86,7 @@ class TimeConfig:
         
         hour = dt.hour
         start_hour, end_hour = cls.get_business_hours()
+        # 结束小时不含：22:00 整已不在营业时段（与知识库 9:00-22:00 口径一致）
         return start_hour <= hour < end_hour
 
 

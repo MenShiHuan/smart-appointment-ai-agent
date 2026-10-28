@@ -1,3 +1,8 @@
+"""
+咨询机器人主控制器
+
+基于知识库 RAG 的流式咨询编排，实例无状态，会话状态挂载 SessionContext。
+"""
 import uuid
 from langchain_core.chat_history import InMemoryChatMessageHistory
 from config.model_provider import create_chat_model
@@ -57,6 +62,7 @@ class ConsultantAgent:
 
     def _initialize_llm(self):
         """初始化通用聊天模型"""
+        # 温度 0.3：咨询回答允许适度发散（预约/分类流程为 0，追求确定性）
         return create_chat_model(temperature=0.3)
 
     async def __aenter__(self):

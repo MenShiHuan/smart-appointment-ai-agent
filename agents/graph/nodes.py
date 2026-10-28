@@ -11,6 +11,7 @@ from langgraph.config import get_stream_writer
 
 from agents.core.session import new_appointment_history
 from config.constants import StateEnum
+from config.domain_terms import FALLBACK_UNSUPPORTED_TASK
 from .state import AgentGraphState
 
 # 分类后的思考提示（与旧 AgentRouter 的输出保持一致）
@@ -126,6 +127,7 @@ def make_memory_node(task_agent):
         ):
             reply.append(token)
             writer(token)
+        # 记忆查询一问一答：回答完回到分类态，下一轮输入重新分类
         session.state.value = StateEnum.CLASSIFY
         return {"reply": reply, "session_state": session.state.value}
     return memory_node
@@ -205,8 +207,8 @@ def make_manual_review_node(task_agent):
 def make_unsupported_node(task_agent):
     """兜底节点：不支持的任务类型"""
     async def unsupported_node(state: AgentGraphState, config) -> dict:
-        # 与 agent_router 兜底话术保持一致（评测集关键词：暂不支持 + 健康理疗）
-        reply_text = "暂不支持该类型任务。请只询问和健康理疗、预约相关的问题。"
+        # 与 agent_router 兜底话术共用领域词表常量（评测集关键词：暂不支持 + 健康理疗）
+        reply_text = FALLBACK_UNSUPPORTED_TASK
         tokens = ["[REPLY][归类机器人]", reply_text]
         writer = get_stream_writer()
         for token in tokens:

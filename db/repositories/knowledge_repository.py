@@ -1,3 +1,8 @@
+"""
+知识库数据访问对象
+
+KnowledgeDocument 的 CRUD、分类/关键词搜索与统计；软删除通过 is_active 标记实现。
+"""
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from ..base.interfaces import BaseKnowledgeRepository
@@ -202,6 +207,7 @@ class KnowledgeRepository(BaseKnowledgeRepository):
                 KnowledgeDocument.is_active == 1
             ).all()
             
+            # keywords 为 JSON 列表，SQL 无法直接做成员匹配，改为加载后内存过滤
             # 简单的关键词匹配
             matched_docs = []
             for doc in documents:

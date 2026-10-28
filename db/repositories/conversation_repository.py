@@ -26,6 +26,7 @@ class ConversationRepository:
                 content=content
             )
             session.add(message)
+            # flush 让自增 ID 立即可用，供调用方直接使用
             session.flush()
             return message.id
 
@@ -35,6 +36,7 @@ class ConversationRepository:
             query = (
                 session.query(ConversationMessage)
                 .filter(ConversationMessage.session_id == session_id)
+                # 按写入时间升序；同刻消息以 id 兜底，保证回放顺序稳定
                 .order_by(ConversationMessage.created_at, ConversationMessage.id)
             )
             if limit is not None:

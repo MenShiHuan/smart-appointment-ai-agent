@@ -16,6 +16,10 @@ _technicians_initialized = False
 
 
 def _ensure_technicians():
+    """确保默认技师已初始化（幂等）：空库时建种子数据，已有数据时仅做档案迁移检查
+
+    进程内只执行一次，避免每个请求都重复建查。
+    """
     global _technicians_initialized
     if _technicians_initialized:
         return
@@ -44,7 +48,11 @@ class ScheduleResponse(BaseModel):
 
 @router.get("/", response_model=List[TechnicianResponse], summary="获取所有技师")
 async def get_all_technicians():
-    """获取所有技师信息"""
+    """获取所有技师信息
+
+    GET /api/technicians/（响应为 TechnicianResponse 列表）
+    gender/strength 未设置时兜底为空字符串。
+    """
     try:
         from services.technician_service import TechnicianService
         technician_service = TechnicianService()
@@ -66,7 +74,12 @@ async def get_all_technicians():
 
 @router.get("/{technician_id}/schedule", response_model=List[ScheduleResponse], summary="获取技师排班")
 async def get_technician_schedule(technician_id: int):
-    """获取指定技师今天的排班信息"""
+    """获取指定技师今天的排班信息
+
+    GET /api/technicians/{technician_id}/schedule
+    仅返回今天（time_config.today，北京时间口径）的排班；技师不存在返回 404；
+    时间统一格式化为 HH:MM 字符串。
+    """
     try:
         from services.technician_service import TechnicianService
         from config.time_config import time_config
@@ -87,6 +100,7 @@ async def get_technician_schedule(technician_id: int):
             ScheduleResponse(
                 id=sched["id"],
                 technician_id=sched["technician_id"],
+                # datetime 格式化为 HH:MM；非 datetime 兜底按字符串原样返回（兼容不同存储类型）
                 start_time=sched["start_time"].strftime("%H:%M") if hasattr(sched["start_time"], 'strftime') else str(sched["start_time"]),
                 end_time=sched["end_time"].strftime("%H:%M") if hasattr(sched["end_time"], 'strftime') else str(sched["end_time"]),
                 status=sched["status"],
@@ -102,7 +116,11 @@ async def get_technician_schedule(technician_id: int):
 
 @router.get("/{technician_id}", response_model=TechnicianResponse, summary="获取单个技师信息")
 async def get_technician(technician_id: int):
-    """获取指定技师的详细信息"""
+    """获取指定技师的详细信息
+
+    GET /api/technicians/{technician_id}
+    不存在返回 404。
+    """
     try:
         from services.technician_service import TechnicianService
         
@@ -127,7 +145,12 @@ async def get_technician(technician_id: int):
 
 @router.get("/schedules/today", summary="获取所有技师今日排班")
 async def get_all_technicians_schedule_today():
-    """获取所有技师今天的排班信息"""
+    """获取所有技师今天的排班信息
+
+    GET /api/technicians/schedules/today
+    响应结构：[{technician_id, technician_name, busy_periods}]，
+    busy_periods 仅收集 busy（已预约）时段，时间格式化为 HH:MM。
+    """
     try:
         from services.technician_service import TechnicianService
         from config.time_config import time_config
@@ -149,6 +172,7 @@ async def get_all_technicians_schedule_today():
             
             busy_periods = []
             for sched in tech_schedules:
+                # 只取 busy（已预约）时段供前端时间轴高亮
                 if sched.get("status") == "busy":
                     busy_periods.append({
                         "start": sched["start_time"].strftime("%H:%M") if hasattr(sched["start_time"], 'strftime') else str(sched["start_time"]),

@@ -19,7 +19,11 @@ NEGATIVE_RESPONSES = ['不', '不要', '不行', '不同意', '取消', '换', '
 
 
 class AppointmentProcessor:
-    """预约处理器"""
+    """预约处理器：协调 抽取 → 技师匹配 → 推荐/落库确认 → 落库 全流程
+
+    以 [SIGNAL]xxx 协议 token 向上透出状态（replan_needed / confirmation_pending /
+    manual_review / recommendation_pending），由调用方（图编排层）决定后续动作。
+    """
     
     def __init__(self, input_parser: InputParser, technician_finder: TechnicianFinder,
                  message_builder: MessageBuilder, appointment_database: AppointmentDatabase, llm=None):
@@ -78,7 +82,11 @@ class AppointmentProcessor:
     def _handle_recommendation_response(self, appointment_history: Dict[str, Any],
                                         data: Dict[str, Any],
                                         user_input: Optional[str] = None) -> bool:
-        """处理用户对推荐技师的回应"""
+        """处理用户对推荐技师的回应
+
+        True=同意推荐（确认技师）或拒绝但携带新选择（继续正常匹配）；
+        False=回应不明确，继续等待；纯拒绝时置 recommendation_declined 标记。
+        """
         user_response = (data.get('confirmation') or '').lower()
         # 兜底：confirmation 未被抽取（未知/空）时，用用户原文做肯定/否定关键词判定，
         # 覆盖"我不换别人，那我改到后天下午三点吧"这类含否定/变更意图的回复
@@ -165,6 +173,7 @@ class AppointmentProcessor:
                 else:
                     yield result
             except Exception as e:
+                # 兜底：回调失败时透出错误并回退无关请求话术，保证至少一条有效回复
                 yield f"[ERROR]处理请求时发生错误: {str(e)}\n"
                 yield self.message_builder.create_unrelated_message()
         else:
@@ -172,7 +181,12 @@ class AppointmentProcessor:
     
     async def handle_complete_appointment(self, appointment_history: Dict[str, Any],
                                         session_id: str) -> AsyncGenerator[str, None]:
-        """处理预约信息完整的情况"""
+        """处理预约信息完整的情况
+
+        分支按优先级依次判定：禁忌转人工 > 用户取消 > 已确认落库 > 拒绝推荐 >
+        确认推荐落库 > 等待明确回复 > 技师检索（推荐待确认 / 落库前确认 /
+        档期冲突通过 [SIGNAL] 协议向上透出）。
+        """
         # B4：禁忌命中 → 转人工（不落库）
         if appointment_history.get('contraindication_hit'):
             if self.emit_confirm_signal:

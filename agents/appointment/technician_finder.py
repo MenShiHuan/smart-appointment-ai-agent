@@ -6,7 +6,6 @@
 
 from typing import Optional, Dict, Any, Callable
 from datetime import datetime, timedelta
-from services.text_embedding import find_best_match_indices
 
 
 class TechnicianFinder:
@@ -23,7 +22,11 @@ class TechnicianFinder:
     }
 
     def parse_time_and_duration(self, start_time_str: str, duration_str: str) -> tuple:
-        """解析预约时间和时长"""
+        """解析预约时间和时长
+
+        返回 (start_time, end_time, duration_min)；时间/时长缺失或非法时返回
+        (None, None, None)，由调用方据此拦截、不进入技师检索。
+        """
         if not start_time_str or start_time_str == "未知":
             return None, None, None
 
@@ -50,7 +53,10 @@ class TechnicianFinder:
     
     def find_specific_technician(self, technician_name: str, start_time: datetime, 
                                end_time: datetime, yield_func: Optional[Callable] = None) -> Optional[Dict]:
-        """查找指定技师的可用性"""
+        """查找指定技师的可用性
+
+        技师不存在或指定时段不空闲时返回 None，交由上层走相似技师推荐分支。
+        """
         # 通过Services层访问数据库
         from services.appointment_service import AppointmentService
         appointment_service = AppointmentService()
@@ -102,7 +108,8 @@ class TechnicianFinder:
         if not target_strength:
             return None
             
-        # 使用文本嵌入找到最相似的技师
+        # 使用文本嵌入找到最相似的技师（延迟导入：agents 对 services 一律函数内引入）
+        from services.text_embedding import find_best_match_indices
         strengths = [tech.get('strength', '') for tech in other_techs]
         indices = find_best_match_indices(target_strength, strengths)
         
@@ -126,6 +133,9 @@ class TechnicianFinder:
         if not preference or preference == "无":
             return all_techs
         
+        # 偏好只做相似度排序不做硬过滤：保留全部技师，后续按顺序查空闲，
+        # 避免偏好无匹配时无人可约（延迟导入：agents 对 services 一律函数内引入）
+        from services.text_embedding import find_best_match_indices
         strengths = [tech.get("strength", "") for tech in all_techs]
         indices = find_best_match_indices(preference, strengths)
         return [all_techs[i] for i in indices]
@@ -191,7 +201,12 @@ class TechnicianFinder:
     
     def find_technician_with_thought(self, appointment_history: Dict[str, Any], 
                                    yield_func: Optional[Callable] = None) -> Optional[Dict]:
-        """带思考提示的技师检索流程"""
+        """带思考提示的技师检索流程
+
+        返回结构：普通命中返回技师 dict；推荐场景返回 {is_recommendation,
+        original_technician, recommended_technician, requires_confirmation}
+        供确认流程使用；无可用技师返回 None。
+        """
         # 通过Services层访问数据库
         from services.appointment_service import AppointmentService
         appointment_service = AppointmentService()

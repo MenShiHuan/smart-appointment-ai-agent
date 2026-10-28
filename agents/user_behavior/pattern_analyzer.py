@@ -21,33 +21,18 @@ class PatternAnalyzer:
         self.behavior_service = behavior_service
         self.technician_service = technician_service
         self.logger = logging.getLogger(__name__)
-    
-    @property
-    def behavior_db(self):
-        """为了向后兼容，提供behavior_db属性"""
-        if hasattr(self, 'behavior_service') and self.behavior_service:
-            # 返回一个适配器，将调用转发到behavior_service
-            return self.behavior_service.user_behavior_repo
-        else:
-            # 如果没有service，返回None（应该在组件初始化时提供适当的处理）
-            return None
-    
+
     def analyze_user_preferences(self, user_id: str = "default_user") -> Optional[Dict[str, Any]]:
         """分析用户偏好：最喜欢的技师、常用服务、常用时长"""
         try:
+            if not self.behavior_service:
+                return None
             # 获取用户所有预约历史
-            if self.behavior_service:
-                appointments = self.behavior_service.get_user_behaviors(
-                    user_id=user_id,
-                    action_type='appointment'
-                )
-            else:
-                # 向后兼容
-                appointments = self.behavior_db.get_user_behaviors(
-                    user_id=user_id,
-                    action_type='appointment'
-                )
-            
+            appointments = self.behavior_service.get_user_behaviors(
+                user_id=user_id,
+                action_type='appointment'
+            )
+
             if not appointments:
                 return None
             
@@ -79,6 +64,7 @@ class PatternAnalyzer:
             favorite_service = max(service_counts, key=service_counts.get) if service_counts else None
             favorite_duration = max(duration_counts, key=duration_counts.get) if duration_counts else None
             
+            # Repo 按 created_at 倒序返回（见 user_behavior_repository），首条即最近一次预约
             return {
                 'favorite_technician_id': favorite_technician,
                 'favorite_service': favorite_service,
@@ -91,10 +77,12 @@ class PatternAnalyzer:
             self.logger.error(f"分析用户偏好失败: {str(e)}")
             return None
     
+    # 阈值默认 30 天：与 BehaviorRecorder 的默认回看窗口（30 天）同口径
     def should_send_return_reminder(self, user_id: str = "default_user", days_threshold: int = 30) -> bool:
         """判断是否应该发送回访提醒"""
         try:
             preferences = self.analyze_user_preferences(user_id)
+            # 至少 2 次预约才回访：单次不足以判断流失，也避免打扰新客
             if not preferences or preferences['total_appointments'] < 2:
                 return False
 
@@ -133,6 +121,7 @@ class PatternAnalyzer:
             if tech_id:
                 tech_service = self.technician_service
                 if tech_service is None:
+                    # 未注入服务时的兜底：按分层架构直接创建 Service 层实例
                     from services.technician_service import TechnicianService
                     tech_service = TechnicianService()
                 tech_info = tech_service.get_technician_by_id(tech_id)

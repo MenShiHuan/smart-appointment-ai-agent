@@ -19,6 +19,7 @@ def _processor():
 
 
 def _data(**overrides) -> dict:
+    """构造 AppointmentExtraction 字典（默认与预约无关），可按键覆盖"""
     base = dict(
         gender="未知", start_time="未知", duration="未知", project="未知",
         preference="未知", technician_name="未知", confirmation="未知",
@@ -39,6 +40,7 @@ def _history_with_recommendation():
 
 
 def test_positive_response_confirms_recommendation():
+    """明确同意：推荐技师转为确认技师，等待确认状态解除"""
     proc = _processor()
     history = _history_with_recommendation()
     result = proc._handle_recommendation_response(history, _data(confirmation="好"))
@@ -48,6 +50,7 @@ def test_positive_response_confirms_recommendation():
 
 
 def test_negative_response_without_new_choice_declines():
+    """纯拒绝：标记 recommendation_declined，不产生确认技师"""
     proc = _processor()
     history = _history_with_recommendation()
     result = proc._handle_recommendation_response(history, _data(confirmation="不"))
@@ -83,6 +86,7 @@ def test_negative_response_with_new_time_keeps_technician():
 
 
 def test_unclear_response_returns_false():
+    """回应不明确：返回 False，保持等待确认"""
     proc = _processor()
     history = _history_with_recommendation()
     result = proc._handle_recommendation_response(history, _data(confirmation="未知"))

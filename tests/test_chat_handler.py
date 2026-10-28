@@ -45,6 +45,7 @@ class StubTaskAgent:
 
 
 async def _collect(user_input, session_id):
+    """以指定 session_id 走 API 流式入口，返回拼接后的完整回复"""
     from api.chat_handler import ProcessUserInput_stream
     tokens = []
     async for token in ProcessUserInput_stream(user_input, session_id=session_id):

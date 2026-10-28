@@ -5,13 +5,18 @@
 """
 
 from typing import List, Dict, Any
-from services.knowledge_service import get_knowledge_service
 
 
 class KnowledgeRetriever:
-    """知识检索器"""
+    """知识检索器
+
+    封装知识库单例服务：首次检索时懒初始化（与 API 层共享索引），
+    检索无结果时返回空列表，避免上游处理 None。
+    """
 
     def __init__(self):
+        # 延迟导入：agents 层对 services 的依赖一律函数内引入（分层规则）
+        from services.knowledge_service import get_knowledge_service
         # D1：进程级单例——与 API 层共享索引，API 增删改后在线检索立即可见
         self.knowledge_service = get_knowledge_service()
         self.kb_initialized = False
@@ -24,7 +29,10 @@ class KnowledgeRetriever:
             print("✅ 咨询机器人知识库服务已初始化")
     
     async def search_knowledge(self, query: str, top_k: int = 3) -> List[Dict[str, Any]]:
-        """搜索相关知识"""
+        """搜索相关知识
+
+        未初始化时自动懒初始化；无结果返回空列表。
+        """
         # 确保知识库已初始化
         if not self.kb_initialized:
             await self.initialize()

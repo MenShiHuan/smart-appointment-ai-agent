@@ -19,7 +19,10 @@ class BusinessException(HTTPException):
 
 
 async def api_exception_handler(request: Request, exc: BusinessException):
-    """业务异常处理器"""
+    """业务异常处理器
+
+    保留业务方设定的状态码（默认 400），按统一错误格式 {"status": "error", ...} 返回。
+    """
     logger.error(f"业务异常: {exc.detail}")
     return JSONResponse(
         status_code=exc.status_code,
@@ -40,12 +43,16 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 
 async def general_exception_handler(request: Request, exc: Exception):
-    """通用异常处理器"""
+    """通用异常处理器
+
+    500 兜底：对前端只回固定文案，异常详情与堆栈仅写入日志（避免内部信息泄漏）。
+    """
     import traceback
     error_detail = f"未处理异常: {str(exc)}"
     stack_trace = traceback.format_exc()
     logger.error(f"{error_detail}\n{stack_trace}")
 
+    # 固定文案兜底：不把异常细节透出给前端
     return JSONResponse(
         status_code=500,
         content={"status": "error", "message": "服务器内部错误"}

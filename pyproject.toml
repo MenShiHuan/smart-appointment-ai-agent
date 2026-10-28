@@ -1,0 +1,17 @@
+[project]
+name = "smart-appointment-ai-agent"
+version = "1.0.0"
+description = "智能健康理疗预约与服务 Agent 平台（五层架构：Web&Application / API / Agents / Services / DB）"
+requires-python = ">=3.11"
+# 依赖以 requirements.txt 为唯一来源，pyproject 不声明 dependencies
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+# 仅声明包发现规则：安装/打包时不会包含 tests
+packages = { find = { include = ["agents*", "api*", "application*", "config*", "db*", "evals*", "services*", "web*"] } }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

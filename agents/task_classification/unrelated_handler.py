@@ -74,7 +74,9 @@ class UnrelatedHandler:
 
         # 生成流式回复
         reply = self._get_next_reply()
+        # [REPLY] 前缀标识回复正文，前端按前缀区分展示类型
         yield "[REPLY][归类机器人]"
+        # 逐字符产出模拟流式打字效果
         for char in reply:
             yield char
 
@@ -82,6 +84,7 @@ class UnrelatedHandler:
         """获取下一个回复内容（轮换索引按会话隔离）"""
         if self.session is None:
             return self._default_replies[0]
+        # 同一会话内轮换话术避免连续重复；索引挂会话实现多会话隔离
         reply = self._default_replies[self.session.unrelated_reply_index % len(self._default_replies)]
         self.session.unrelated_reply_index += 1
         return reply

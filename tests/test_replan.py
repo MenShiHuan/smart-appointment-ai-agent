@@ -81,6 +81,7 @@ class StubTaskAgent:
 
 
 async def _run(tmp_path, task_agent, sid):
+    """以固定输入运行一轮图任务，返回拼接后的全部 token"""
     graph = build_agent_graph(task_agent)
     tokens = []
     async for token in stream_graph_task(graph, "我想预约今天下午3点的理疗", sid):
@@ -154,6 +155,7 @@ def test_no_conflict_keeps_normal_flow(tmp_path):
 # ============ 单元测试 ============
 
 def test_attempt_hash_deterministic_and_distinct():
+    """尝试哈希：同技师同时段哈希一致，不同时段哈希不同（幂等熔断依据）"""
     h1 = ReplanHandler.attempt_hash("张伟", "2026-09-23 16:00")
     h2 = ReplanHandler.attempt_hash("张伟", "2026-09-23 16:00")
     h3 = ReplanHandler.attempt_hash("张伟", "2026-09-23 17:00")
@@ -162,6 +164,7 @@ def test_attempt_hash_deterministic_and_distinct():
 
 
 def test_suggest_time_parses_json_with_code_fences():
+    """建议解析：代码围栏包裹的 JSON 建议可正确解析"""
     llm = FakeLLM(['```json\n{"suggested_time": "2026-09-23 16:00", "reason": "顺延"}\n```'])
     handler = ReplanHandler(llm)
     result = asyncio.run(handler.suggest_time({"start_time": "2026-09-23 15:00"}))
@@ -182,6 +185,7 @@ def test_suggest_time_falls_back_to_plus_one_hour():
 
 
 def test_suggest_time_returns_empty_when_time_unparseable():
+    """原时段不可解析：返回空建议"""
     llm = FakeLLM(["garbage"])
     handler = ReplanHandler(llm)
     result = asyncio.run(handler.suggest_time({"start_time": "未知"}))

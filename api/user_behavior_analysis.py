@@ -24,7 +24,11 @@ class UserAnalysisResponse(BaseModel):
 
 
 async def get_user_analysis(user_id: str = "default_user") -> UserAnalysisResponse:
-    """获取用户行为分析数据"""
+    """获取用户行为分析数据
+
+    汇总最爱技师/服务/时长、总预约次数、距上次预约天数及是否应发提醒；
+    数据缺失或异常时降级返回全空/默认值对象（异常仅记日志，监控可见）。
+    """
     try:
         # 复用全局单例（避免每请求重建 LLM 客户端与数据服务）
         from api.chat_handler import task_agent
@@ -59,7 +63,10 @@ async def get_user_analysis(user_id: str = "default_user") -> UserAnalysisRespon
 
 @router.get("/analysis", response_model=UserAnalysisResponse)
 async def get_default_user_analysis():
-    """获取默认用户的行为分析数据"""
+    """获取默认用户的行为分析数据
+
+    GET /api/user-behavior/analysis（默认用户 default_user）
+    """
     return await get_user_analysis("default_user")
 
 
@@ -76,7 +83,12 @@ class ReminderResponse(BaseModel):
 
 @router.post("/send-reminder", response_model=ReminderResponse, summary="发送回访提醒")
 async def send_reminder(request: ReminderRequest):
-    """生成并返回回访提醒消息"""
+    """生成并返回回访提醒消息
+
+    POST /api/user-behavior/send-reminder
+    响应含回访文案与技师可用时段；查询失败时返回固定兜底话术而非报错，
+    保证前端始终有可展示内容。
+    """
     try:
         from api.chat_handler import task_agent
         agent = task_agent.behavior_agent
@@ -89,6 +101,7 @@ async def send_reminder(request: ReminderRequest):
 
     except Exception as e:
         logger.error(f"生成回访提醒失败: {e}")
+        # 兜底话术：服务异常时仍返回可展示文案（避免前端空白），可用时段置空
         return ReminderResponse(
             message="尊敬的客户，您好！系统暂时无法查询理疗师时间，请稍后再试或直接联系我们预约。",
             technician_available_times=[]

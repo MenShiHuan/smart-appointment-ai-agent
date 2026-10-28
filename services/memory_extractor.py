@@ -1,6 +1,9 @@
 """
 离线记忆整合 - 偏好候选抽取器（C4a）
 
+（自 agents/user_behavior/ 移入 Services 层：纯抽取工具，唯一消费者是
+services/memory_service.py，移入后消除 Services→Agents 的唯一模块级反向边。）
+
 混合抽取策略：
 1. appointment 行为 → 规则抽取（action_data 已结构化，零 LLM 成本）
 2. consultation 行为 → LLM 结构化抽取（question 自由文本中的偏好信号），
@@ -13,6 +16,8 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
+
+from services.json_utils import extract_json
 
 
 @dataclass
@@ -35,6 +40,7 @@ def _time_period_from_start_time(start_time: str) -> Optional[str]:
         dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
     except (ValueError, TypeError):
         return None
+    # 时段边界与 preference_manager.update_time_preference 的划分保持一致
     if 6 <= dt.hour < 12:
         return "上午"
     if 12 <= dt.hour < 18:
@@ -119,9 +125,11 @@ class ConsultationExtractor:
             self._structured_llm = None
 
     async def extract(self, question: str, behavior: Dict[str, Any]) -> List[PreferenceCandidate]:
+        """从咨询文本抽取偏好候选；抽取失败返回空列表（丢弃该条，不阻塞整合流程）"""
         result = await self._try_extract(question)
         if result is None:
             return []
+        # 白名单过滤：只接受与 MemoryEntry.entry_type 对齐的五类，防御 LLM 越界输出
         return [
             PreferenceCandidate(p.preference_type, p.content, behavior["id"],
                                 behavior.get("session_id"))
@@ -131,6 +139,7 @@ class ConsultationExtractor:
         ]
 
     async def _try_extract(self, question: str) -> Optional[PreferenceExtractionResult]:
+        """结构化输出优先，失败回退 prompt+JSON 修复重试；全部失败返回 None"""
         prompt = EXTRACTION_PROMPT.format(question=question)
 
         # 1. 结构化输出路径
@@ -142,19 +151,19 @@ class ConsultationExtractor:
             except Exception as e:
                 print(f"[MemoryExtractor] 结构化抽取失败，进入 JSON 回退: {e}")
 
-        # 2. prompt+JSON 路径（含一次修复重试）
+        # 2. prompt+JSON 路径（含一次修复重试；统一提取工具，见 services/json_utils.py）
         try:
-            import json
             raw = await self._invoke_raw(prompt)
             try:
-                data = json.loads(raw)
+                data = extract_json(raw)
                 return PreferenceExtractionResult.model_validate(data)
             except Exception as first_error:
+                # 回显截断：只回带输出片段，避免异常长输出撑大修复提示
                 repair_prompt = (prompt + f"\n你上次的输出无法解析：{raw[:200]}"
                                  f"\n错误信息：{first_error}\n请直接输出纯JSON。")
                 raw_retry = await self._invoke_raw(repair_prompt)
                 try:
-                    data = json.loads(raw_retry)
+                    data = extract_json(raw_retry)
                     return PreferenceExtractionResult.model_validate(data)
                 except Exception:
                     return None
@@ -163,5 +172,6 @@ class ConsultationExtractor:
             return None
 
     async def _invoke_raw(self, prompt_text: str) -> str:
+        """以用户消息调用 LLM 并返回原始文本输出"""
         response = await self.llm.ainvoke([{"role": "user", "content": prompt_text}])
         return response.content if hasattr(response, "content") else str(response)

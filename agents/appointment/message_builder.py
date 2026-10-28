@@ -6,9 +6,15 @@
 
 from typing import Dict, Any, List
 
+from config.domain_terms import FALLBACK_UNSUPPORTED_TASK
+
 
 class MessageBuilder:
-    """消息构建器"""
+    """消息构建器
+
+    集中管理预约全流程话术：个性化措辞走 LLM 生成、失败兜底走硬编码模板，
+    保证任何异常路径下都能给出有效回复。
+    """
     
     def __init__(self):
         # 必填槽位追问话术（时间 + 项目；时长/性别等选填信息不再追问）
@@ -121,8 +127,8 @@ class MessageBuilder:
         return "[REPLY][预约机器人]抱歉，我无法处理这个问题。我只能帮您处理健康理疗相关的预约。请问您需要预约服务吗？\n"
 
     def create_unsupported_message(self) -> str:
-        """标准拒绝话术（与归类机器人兜底话术一致）"""
-        return "暂不支持该类型任务。请只询问和健康理疗、预约相关的问题。"
+        """标准拒绝话术（与归类机器人兜底话术共用领域词表常量）"""
+        return FALLBACK_UNSUPPORTED_TASK
 
     def create_booking_confirmation_message(self, tech: Dict[str, Any], appointment_history: Dict[str, Any]) -> str:
         """落库前确认：预约摘要 + 禁忌筛查问询（B4）"""

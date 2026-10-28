@@ -5,7 +5,6 @@
 主路径：LLM 结构化输出（Pydantic with_structured_output）；
 失败时带错误信息修复重试 1 次，再失败降级为默认值并记录 parse_error 计数。
 """
-import json
 from typing import Any, Dict, Generator, Optional
 
 from langchain.prompts import PromptTemplate
@@ -17,7 +16,12 @@ from .schemas import AppointmentExtraction
 
 
 class InputParser:
-    """用户输入解析器"""
+    """用户输入解析器
+
+    结构化输出优先（with_structured_output）；失败降级为 prompt+JSON 并带错误
+    信息修复重试 1 次，仍失败返回默认值（missing_info=["所有信息"]）并累计
+    parse_error_count。
+    """
 
     def __init__(self, llm: BaseChatModel):
         self.llm = llm
@@ -122,6 +126,7 @@ class InputParser:
             print(f"[InputParser] 首次解析失败: {first_error}")
 
             # 修复重试：将原始输出与错误反馈给模型
+            # 截断过长输出（200 字符）反馈给模型，避免修复重试 prompt 过长
             repair_prompt = (
                 self.prompt.format(history=history_str, user_input=user_input)
                 + f"\n你上次的输出无法解析：{raw[:200]}\n错误信息：{first_error}\n请直接输出纯JSON。"
@@ -143,8 +148,9 @@ class InputParser:
         return response.content if hasattr(response, "content") else str(response)
 
     def _parse_raw(self, raw: str) -> AppointmentExtraction:
-        """解析原始 JSON 并校验为 Pydantic 模型"""
-        data = json.loads(raw)
+        """解析原始 JSON 并校验为 Pydantic 模型（统一提取工具，见 services/json_utils.py）"""
+        from services.json_utils import extract_json
+        data = extract_json(raw)
         if not isinstance(data, dict):
             raise ValueError("输出不是 JSON 对象")
         return AppointmentExtraction.model_validate(data)

@@ -16,6 +16,7 @@ from ..models import utcnow, MemoryEntry, IntegrationWatermark, MemoryChangeLog
 
 
 def _entry_to_dict(entry: MemoryEntry) -> Dict[str, Any]:
+    """记忆条目 → 字典（召回与整合共用的一致序列化口径）"""
     return {
         "id": entry.id,
         "user_id": entry.user_id,
@@ -45,6 +46,7 @@ class MemoryRepository:
                      embedding: Optional[List[float]] = None, importance: float = 1.0,
                      confidence: float = 0.0, session_id: Optional[str] = None) -> int:
         """创建记忆条目，返回条目 id（初始证据来自 session_id 对应会话）"""
+        # 初始证据：有 session_id 才计入跨会话证据（distinct_sessions 与之一致）
         sessions = [session_id] if session_id else []
         with self.session_manager.session_scope() as session:
             entry = MemoryEntry(

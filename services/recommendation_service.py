@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 class RecommendationService:
     """推荐调度服务类"""
+    # 后台定时调度入口：每小时检查离线记忆整合触发条件（C4a），并提供手动触发与状态查询
     
     def __init__(self):
         # 延迟导入避免循环依赖
@@ -55,6 +56,7 @@ class RecommendationService:
             logger.error(f"定时推荐生成任务失败: {str(e)}")
             return None
 
+    # 记忆服务进程级缓存：避免每次任务重复创建 engine 与 LLM 客户端
     _memory_service = None
 
     def run_memory_integration_job(self) -> Optional[Dict[str, Any]]:

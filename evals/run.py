@@ -13,7 +13,8 @@
   python -m evals.run --subset qa --limit 5    # 抽样小跑
   python -m evals.run --report evals/report.md # 指定报告路径
 
-依赖：Ollama（bge-m3）已启动；.env 已配置 DeepSeek key。
+依赖：.env 已配置 DeepSeek key 与 DashScope 凭证（text-embedding-v3 / gte-rerank-v2）；
+知识库评测（qa/e2e 咨询链路）需 Milvus 服务可用。
 产物：evals/report.md（各子集指标 + 逐条明细 + 失败样本，供 E3 回灌）。
 
 隔离：评测使用独立数据库（data/eval_smart_appointment.db 与 eval_checkpoints.db），
@@ -23,12 +24,13 @@ import argparse
 import asyncio
 import json
 import os
-import re
 import statistics
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
+
+from services.json_utils import extract_json
 
 # ============ 评测环境隔离（必须在任何业务模块导入前生效） ============
 _EVAL_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -36,6 +38,12 @@ _EVAL_DB_FILE = _EVAL_DIR / "eval_smart_appointment.db"
 _EVAL_CKPT_FILE = _EVAL_DIR / "eval_checkpoints.db"
 os.environ["DATABASE_URL"] = f"sqlite:///{_EVAL_DB_FILE}"
 os.environ["CHECKPOINT_DB_PATH"] = str(_EVAL_CKPT_FILE)
+
+from dotenv import load_dotenv
+
+# api key 唯一来源 .env：环境隔离已生效（load_dotenv 不覆盖既有变量），
+# 再加载 .env 获取 LLM/DashScope 凭证
+load_dotenv()
 
 
 def _reset_eval_db():
@@ -62,6 +70,7 @@ DEFAULT_REPORT = Path(__file__).parent / "report.md"
 
 
 def load_dataset(name: str):
+    """加载数据集 JSON（evals/dataset/<name>.json）"""
     with open(DATASET_DIR / f"{name}.json", encoding="utf-8") as f:
         return json.load(f)
 
@@ -69,6 +78,7 @@ def load_dataset(name: str):
 # ============ 意图分类 ============
 
 async def eval_intent(llm, cases, limit=None):
+    """意图分类评测：TaskClassifier 单轮分类结果与期望类别比对"""
     from agents.task_classification.task_classifier import TaskClassifier
     classifier = TaskClassifier(llm)
     results = []
@@ -110,6 +120,7 @@ def _compare_slots(expected: dict, ex) -> dict:
 
 
 async def eval_slots(llm, cases, limit=None):
+    """槽位抽取评测：InputParser 结构化抽取，逐字段与期望比对（start_time 相对表达式按运行日换算）"""
     from agents.appointment.input_parser import InputParser
     parser = InputParser(llm)
     results = []
@@ -145,14 +156,8 @@ JUDGE_PROMPT = """你是严格的评测裁判。判断助手回答是否满足�
 只输出JSON：{{"correct": true或false, "reason": "一句话说明"}}"""
 
 
-def _extract_json(text: str) -> str:
-    """剥离代码块标记，取首个 JSON 片段"""
-    text = re.sub(r"```(?:json)?", "", text).strip()
-    match = re.search(r"\{.*\}", text, re.S)
-    return match.group(0) if match else text
-
-
 async def judge_answer(judge_llm, question: str, points: list, answer: str):
+    """LLM-as-judge 判分：解析失败时带提示重试一次；仍失败标记 judge_parse_failed（与判错区分）"""
     prompt = JUDGE_PROMPT.format(
         question=question,
         points="\n".join(f"- {p}" for p in points),
@@ -162,7 +167,7 @@ async def judge_answer(judge_llm, question: str, points: list, answer: str):
         response = await judge_llm.ainvoke([{"role": "user", "content": prompt}])
         raw = response.content if hasattr(response, "content") else str(response)
         try:
-            data = json.loads(_extract_json(raw))
+            data = extract_json(raw)
             return bool(data.get("correct")), str(data.get("reason", "")), False
         except Exception:
             prompt += f"\n你上次输出无法解析：{raw[:100]}\n请直接输出纯JSON。"
@@ -171,6 +176,7 @@ async def judge_answer(judge_llm, question: str, points: list, answer: str):
 
 
 async def eval_qa(llm, cases, limit=None):
+    """咨询问答评测：真实检索（知识库单例）+ 真实生成 + LLM-as-judge 判分"""
     from agents.consultant.consultation_processor import ConsultationProcessor
     from agents.consultant.consultation_classifier import ConsultationClassifier
     from agents.consultant.response_generator import ResponseGenerator
@@ -210,6 +216,7 @@ def _db():
 
 
 def _ensure_technicians():
+    """确保评测库存在理疗师种子数据（qa 的档案注入与 e2e 的档期匹配共用）"""
     from services.technician_service import TechnicianService
     svc = TechnicianService()
     if svc.get_technicians_count() == 0:
@@ -217,6 +224,7 @@ def _ensure_technicians():
 
 
 def _schedule_max_id(db) -> int:
+    """排班表基线最大 id：预置种子前记录，供断言与清理界定范围"""
     from db.models import TechnicianSchedule
     with db.session_manager.session_scope() as session:
         rows = session.query(TechnicianSchedule.id).all()
@@ -235,6 +243,7 @@ def _add_busy(name: str, start_dt, end_dt) -> int:
 
 
 def _new_busy_after(db, max_id) -> bool:
+    """检查基线后是否新增真实预约排班（appointment_id > 0；种子行用 -1 区分）"""
     from db.models import TechnicianSchedule
     with db.session_manager.session_scope() as session:
         rows = session.query(TechnicianSchedule).filter(
@@ -281,6 +290,7 @@ def _pre_setup(case_id: str, db) -> tuple:
 
 
 async def eval_e2e(cases, limit=None):
+    """端到端评测：生产 LangGraph 图多轮断言（含档期冲突与记忆用例的确定性预置）"""
     from api.chat_handler import ProcessUserInput_stream
 
     db = _db()
@@ -338,6 +348,7 @@ async def eval_e2e(cases, limit=None):
 # ============ 报告 ============
 
 def _p95(elapsed_list):
+    """P95 耗时：样本不足 20 时按样本数分位，避免 quantiles 抛异常"""
     if not elapsed_list:
         return 0.0
     if len(elapsed_list) < 2:
@@ -348,11 +359,12 @@ def _p95(elapsed_list):
 
 
 def generate_report(all_results: dict, report_path) -> str:
+    """生成 Markdown 评测报告（总览 + 各子集逐条明细），返回报告文本"""
     lines = [
         "# 评测报告",
         "",
         f"> 生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        "> 模型：DeepSeek deepseek-chat；向量：本地 Ollama bge-m3",
+        "> 模型：DeepSeek deepseek-chat；向量：DashScope text-embedding-v3（知识 RAG 经 Milvus）",
         "",
     ]
     summaries = {}
@@ -418,6 +430,7 @@ EVALUATORS = {"intent": eval_intent, "slots": eval_slots, "qa": eval_qa}
 
 
 async def main():
+    """入口：解析参数 → 重置评测库 → 逐子集评测 → 生成报告 → 关闭 checkpointer"""
     parser = argparse.ArgumentParser(description="评测流水线")
     parser.add_argument("--subset", default="intent,slots,qa,e2e",
                         choices=["intent", "slots", "qa", "e2e"],

@@ -21,6 +21,7 @@ class ConversationService:
 
     def add_message(self, session_id: str, role: str, content: str) -> int:
         """添加一条会话消息"""
+        # 返回新消息的数据库 ID
         return self.conversation_repo.add_message(session_id, role, content)
 
     def get_messages(self, session_id: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:

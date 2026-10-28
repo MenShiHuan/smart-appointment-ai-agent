@@ -25,22 +25,34 @@ class ChatRequest(BaseModel):
     message: str
     session_id: str | None = None
 
+# session_id 白名单校验：仅允许字母/数字/下划线/连字符且 1-64 位，
+# 防止非法字符进入 checkpoint 线程键（thread_id）或日志
 _SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 @router.get("/", response_class=HTMLResponse, summary="主页")
 async def read_root(request: Request):
-    """渲染主页聊天界面"""
+    """渲染主页聊天界面
+
+    GET /：返回 index.html（聊天主界面）。
+    """
     return templates.TemplateResponse("index.html", {"request": request})
 
 @router.get("/metrics", summary="进程内指标（F1）")
 async def metrics():
-    """轻量指标端点：请求计数与阶段耗时统计"""
+    """轻量指标端点：请求计数与阶段耗时统计
+
+    GET /metrics：返回进程内指标快照（请求数/错误数/阶段耗时），供监控抓取。
+    """
     from services.trace import metrics_registry
     return metrics_registry.snapshot()
 
 @router.post("/chat/stream", summary="流式聊天")
 async def chat_stream_endpoint(chat: ChatRequest):
-    """处理流式聊天请求（按 session_id 隔离会话）"""
+    """处理流式聊天请求（按 session_id 隔离会话）
+
+    POST /chat/stream：text/plain 流式响应，逐 token 透传；
+    session_id 为空时由服务端自动新建会话；格式非法返回 400。
+    """
     if chat.session_id and not _SESSION_ID_PATTERN.match(chat.session_id):
         raise HTTPException(status_code=400, detail="session_id 格式非法")
 
@@ -56,12 +68,19 @@ async def chat_stream_endpoint(chat: ChatRequest):
 
 @router.get("/user_behavior", response_class=HTMLResponse, summary="用户行为分析页面")
 async def user_behavior_page(request: Request):
-    """用户行为分析页面"""
+    """用户行为分析页面
+
+    GET /user_behavior：渲染 user_behavior_analysis.html。
+    """
     return templates.TemplateResponse("user_behavior_analysis.html", {"request": request})
 
 @router.get("/knowledge", response_class=HTMLResponse, summary="知识库管理页面")
 async def knowledge_page(request: Request):
-    """知识库管理页面"""
+    """知识库管理页面
+
+    GET /knowledge：知识数据经 API 层预取注入模板；
+    取数失败时以空数据 + error 渲染（页面自备兜底展示）。
+    """
     # 通过API层获取知识库数据
     try:
         from api.knowledge import get_all_knowledge
@@ -86,7 +105,11 @@ async def knowledge_page(request: Request):
 
 @router.get("/technician", response_class=HTMLResponse, summary="理疗师状态页面")
 async def technician_page(request: Request):
-    """理疗师状态页面"""
+    """理疗师状态页面
+
+    GET /technician：技师数据经 API 层预取注入模板；
+    取数失败时以空列表 + error 渲染。
+    """
     # 通过API层获取理疗师数据
     try:
         from api.technician import get_all_technicians
@@ -107,7 +130,11 @@ async def technician_page(request: Request):
 
 @router.get("/technician_schedule", response_class=HTMLResponse, summary="理疗师排班页面")
 async def technician_schedule_page(request: Request):
-    """理疗师排班页面"""
+    """理疗师排班页面
+
+    GET /technician_schedule：渲染当日排班时间轴页（12:00-22:00 营业时段）；
+    取数失败时以空排班 + error 渲染。
+    """
     try:
         from api.technician import get_all_technicians_schedule_today
         from config.time_config import time_config
@@ -142,5 +169,8 @@ async def technician_schedule_page(request: Request):
 
 @router.get("/user_behavior_analysis", response_class=HTMLResponse, summary="用户行为分析页面")
 async def user_behavior_analysis_page(request: Request):
-    """用户行为分析页面"""
+    """用户行为分析页面
+
+    GET /user_behavior_analysis：与 /user_behavior 渲染同一模板页。
+    """
     return templates.TemplateResponse("user_behavior_analysis.html", {"request": request})

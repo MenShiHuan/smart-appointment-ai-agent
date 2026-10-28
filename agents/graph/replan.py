@@ -7,11 +7,12 @@
 3. 护栏：最多 2 轮；相同 (理疗师, 时间) 尝试哈希重复即熔断，输出降级话术
 """
 import hashlib
-import json
 from typing import Any, Dict
 
+# 重规划轮数上限：超出即熔断降级（见 nodes.make_appointment_node 中的 loop_count 判定）
 MAX_REPLAN_ROUNDS = 2
 
+# 熔断降级话术：LLM 建议失败、相同尝试重复或超轮次时统一输出
 BREAKER_MESSAGE = (
     "[REPLY][预约机器人]很抱歉，您期望的时段附近暂时没有空闲理疗师。"
     "建议您更换其他时间，或直接致电门店为您人工安排。"
@@ -28,6 +29,7 @@ class ReplanHandler:
     def attempt_hash(technician_name: str, suggested_time: str) -> str:
         """(理疗师, 建议时间) 尝试的哈希，用于熔断检测"""
         key = f"{technician_name}|{suggested_time}"
+        # 截断前 16 位：作为去重键足够，无需完整摘要长度
         return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
 
     async def suggest_time(self, appointment_history: Dict[str, Any]) -> Dict[str, str]:
@@ -46,13 +48,9 @@ class ReplanHandler:
         try:
             response = await self.llm.ainvoke([{"role": "user", "content": prompt}])
             raw = response.content if hasattr(response, "content") else str(response)
-            # 去除可能的代码块标记
-            raw = (raw.strip()
-                   .removeprefix("```json")
-                   .removeprefix("```")
-                   .removesuffix("```")
-                   .strip())
-            data = json.loads(raw)
+            # 统一 JSON 提取（剥围栏 + 正则兜底，见 services/json_utils.py）
+            from services.json_utils import extract_json
+            data = extract_json(raw)
             if data.get("suggested_time"):
                 return data
             raise ValueError("缺少 suggested_time")

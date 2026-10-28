@@ -21,8 +21,6 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from config.constants import SharedState
 
-DEFAULT_DB_PATH = 'sqlite:///data/smart_appointment.db'
-
 
 def new_appointment_history() -> Dict[str, Any]:
     """创建空的预约槽位状态"""
@@ -44,6 +42,7 @@ class PersistentChatHistory(InMemoryChatMessageHistory):
         super().__init__()
         self._session_id = session_id
         self._repo = repo
+        # _loading 标记正在从库恢复历史：此期间的增删只动内存，避免重复落库
         self._loading = False
 
     def load(self) -> None:
@@ -61,6 +60,7 @@ class PersistentChatHistory(InMemoryChatMessageHistory):
     def add_message(self, message) -> None:
         """添加消息：先入内存，再落库"""
         super().add_message(message)
+        # 恢复历史期间（_loading=True）只入内存，跳过落库以免重复写入
         if not self._loading:
             role = "user" if message.type == "human" else "assistant"
             self._repo.add_message(self._session_id, role, message.content)
@@ -68,6 +68,7 @@ class PersistentChatHistory(InMemoryChatMessageHistory):
     def clear(self) -> None:
         """清空历史：内存与数据库同步清除"""
         super().clear()
+        # 恢复历史期间同样跳过库操作（与 add_message 同一守卫约定）
         if not self._loading:
             self._repo.delete_session_messages(self._session_id)
 
@@ -158,6 +159,7 @@ class SessionRegistry:
 
     @property
     def conversation_repo(self):
+        """会话消息仓库（经 Services 层访问，供聊天历史落库与恢复）"""
         return self._conversation_service.conversation_repo
 
     def new_session_id(self) -> str:
@@ -187,6 +189,7 @@ class SessionRegistry:
             history.load()
             ctx = SessionContext(session_id=session_id, chat_history=history)
             self._sessions[session_id] = ctx
+        # 每次访问刷新活跃时间：避免 TTL 淘汰仍在使用的会话
         ctx.updated_at = time.time()
         return ctx
 

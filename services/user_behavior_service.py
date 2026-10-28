@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 class UserBehaviorService:
     """用户行为服务类"""
+    # 行为记录/偏好读写 + 预约行为模式分析（预约频率、偏好技师、时段偏好）
     
     def __init__(self, db_path: str = None):
         self.db_router = DatabaseRouter(db_path)
@@ -83,6 +84,7 @@ class UserBehaviorService:
     def analyze_user_patterns(self, user_id: str) -> Dict[str, Any]:
         """分析用户行为模式"""
         try:
+            # 分析窗口固定近 30 天（与返回的 analysis_period_days 口径一致）
             behaviors = self.get_user_behaviors(user_id, days_back=30)
             
             if not behaviors:
@@ -98,6 +100,7 @@ class UserBehaviorService:
             # 分析时间偏好
             time_preference = self._analyze_time_preference(appointment_behaviors)
             
+            # 业务口径：30 天内预约次数 > 2 记为活跃用户
             return {
                 "pattern": "active_user" if len(appointment_behaviors) > 2 else "occasional_user",
                 "frequency_analysis": freq_analysis,
@@ -144,6 +147,7 @@ class UserBehaviorService:
         intervals = [(dates[i+1] - dates[i]).days for i in range(len(dates)-1)]
         avg_interval = sum(intervals) / len(intervals)
         
+        # 频率分档规则：<7 天高频 / <14 天频繁 / <30 天规律 / 其余偶尔
         if avg_interval < 7:
             frequency = "very_frequent"
         elif avg_interval < 14:
@@ -169,6 +173,7 @@ class UserBehaviorService:
         
         # 返回预约次数最多的技师
         most_frequent_technician = max(technician_counts, key=technician_counts.get)
+        # 仅出现 1 次不足以构成偏好，返回 None 避免噪声偏好
         return most_frequent_technician if technician_counts[most_frequent_technician] > 1 else None
     
     def _analyze_time_preference(self, appointment_behaviors: List[Dict[str, Any]]) -> Dict[str, Any]:

@@ -13,7 +13,8 @@ from .session_manager import (
     resolve_db_path,
     DEFAULT_DB_PATH,
 )
-from .interfaces import BaseTechnicianRepository, BaseKnowledgeRepository, BaseUserBehaviorRepository
+from .interfaces import (BaseTechnicianRepository, BaseKnowledgeRepository,
+                         BaseUserBehaviorRepository, BaseScheduleRepository)
 
 __all__ = [
     'SessionManager',
@@ -22,5 +23,6 @@ __all__ = [
     'DEFAULT_DB_PATH',
     'BaseTechnicianRepository',
     'BaseKnowledgeRepository',
-    'BaseUserBehaviorRepository'
+    'BaseUserBehaviorRepository',
+    'BaseScheduleRepository'
 ]

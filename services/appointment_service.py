@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 class AppointmentService:
     """预约服务类"""
+    # 对 technician_repo 的薄封装：读接口异常时兜底返回安全默认值（None/False/[]），不向调用方抛异常
     
     def __init__(self, db_path: str = None):
         self.db_router = DatabaseRouter(db_path)
@@ -27,6 +28,7 @@ class AppointmentService:
                         session_id: str) -> bool:
         """保存预约信息到数据库（事务内冲突复查，冲突返回 False）"""
         try:
+            # 预约单号取毫秒时间戳：系统无独立预约主表，需全局唯一值把排班行关联到一次预约
             appointment_id = int(time.time() * 1000)
 
             # 同一事务内检查冲突并落库，避免双订竞态
@@ -84,6 +86,7 @@ class AppointmentService:
     
     def get_technician_schedules(self, technician_id: int, date) -> List[Dict[str, Any]]:
         """获取技师排班信息"""
+        # 按 date 所在自然日过滤（该日 0 点至次日 0 点的排班）
         try:
             return self.technician_repo.get_technician_schedules(technician_id, date)
         except Exception as e:

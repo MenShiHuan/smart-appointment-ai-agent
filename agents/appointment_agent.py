@@ -1,4 +1,9 @@
-from dotenv import load_dotenv
+"""
+预约机器人主控制器
+
+流式编排预约流程（结构化抽取 → 技师匹配 → 落库），实例无状态，
+会话内可变状态（预约槽位/聊天历史/状态机）全部挂载 SessionContext。
+"""
 import uuid
 from langchain_core.chat_history import InMemoryChatMessageHistory
 from config.model_provider import create_chat_model
@@ -16,8 +21,6 @@ from .appointment import (
     MessageBuilder,
     AppointmentDatabase
 )
-
-load_dotenv()
 
 
 class AppointmentAgent:
@@ -167,6 +170,7 @@ class AppointmentAgent:
                             continue
                         yield token
                 finally:
+                    # 信号开关仅本次预约处理生效：无论正常返回还是异常都必须复位，避免污染后续调用
                     self.appointment_processor.emit_replan_signal = False
                     self.appointment_processor.emit_confirm_signal = False
 
@@ -190,6 +194,7 @@ class AppointmentAgent:
                 yield token
 
         except Exception as e:
+            # 兜底降级：任何未预期异常都转为友好错误话术输出，避免流式中断
             yield self.message_builder.create_parse_error_message()
 
     def _reset_after_appointment(self, ctx: SessionContext):

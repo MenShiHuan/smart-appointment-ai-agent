@@ -288,6 +288,7 @@
 </head>
 <body>
     <div class="container">
+        <!-- 页面头部：标题与说明 -->
         <div class="header">
             <h2>
                 <i class="fas fa-calendar-alt"></i>
@@ -297,6 +298,7 @@
         </div>
         
         <div class="content">
+            <!-- 营业时间说明区：今日日期与营业时段提示 -->
             <div class="schedule-info">
                 <h3><i class="fas fa-clock"></i> 营业时间说明</h3>
                 <p>今日日期：{{ current_date }}（北京时间）</p>
@@ -304,6 +306,7 @@
                 <p>红色区域表示已预约时间段，空白区域为可预约时间</p>
             </div>
             
+            <!-- 图例区：营业起止时间与已预约标记说明 -->
             <div class="time-legend">
                 <div class="legend-item">
                     <i class="fas fa-clock"></i>
@@ -319,6 +322,7 @@
                 </div>
             </div>
             
+            <!-- 时间轴容器：每位技师一行，busy 时段按百分比定位渲染为红色块 -->
             <div class="timeline-container">
                 {% if schedule and schedule|length > 0 %}
                     {% for tech in schedule %}
@@ -355,6 +359,7 @@
                     </div>
                     {% endfor %}
                 {% else %}
+                    <!-- 空状态兜底：无排班数据时展示提示 -->
                     <div class="empty-state">
                         <i class="fas fa-calendar-check"></i>
                         <h3>暂无排班信息</h3>

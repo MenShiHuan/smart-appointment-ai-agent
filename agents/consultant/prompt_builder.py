@@ -8,7 +8,11 @@ from typing import List, Dict, Any, Optional
 
 
 class PromptBuilder:
-    """提示词构建器"""
+    """提示词构建器
+
+    集中管理系统提示词、分类提示词与咨询主提示词；
+    主提示词按 知识上下文 → 偏好记忆 → 理疗师档案 三段式注入上下文。
+    """
     
     def __init__(self):
         self.system_prompt = self._create_system_prompt()
@@ -30,6 +34,8 @@ class PromptBuilder:
             "会员福利类问题必须同时说明专属折扣优惠与积分兑换服务；"
             "理疗师资质类问题必须说明持证上岗与3年以上专业经验；"
             "用户问题包含多个子问题时，必须逐一回答每个子问题（如同时问营业时间和地址，两个都要给出答案）。"
+            "【引用规范】基于知识库信息作答时，在答案相应位置标注引用编号（如[1]、[2]），"
+            "编号与知识库信息条目的编号一一对应，便于用户溯源。"
             "知识库中没有的信息（如医保结算、停车、免费茶水等）一律不得编造肯定或否定的具体结论，"
             "必须礼貌兜底并建议用户致电门店或到店咨询确认。"
             "【合规边界】涉及疾病诊断、治疗效果承诺的问题，一律不做诊断、不做疗效承诺，"
@@ -69,14 +75,34 @@ class PromptBuilder:
         return self.classification_prompt_template.format(user_input=user_input)
     
     def _build_knowledge_context(self, knowledge_docs: List[Dict[str, Any]]) -> str:
-        """构建知识库上下文"""
+        """构建知识库上下文
+
+        chunk 内容 + 来源标注：PDF 分片带页码/章节标题，文本知识带分类；
+        条目以 [编号] 形式呈现，供模型在回答中标注引用编号。
+        """
         if not knowledge_docs:
             return "没有找到直接相关的知识库信息，请基于你对健康理疗服务的专业知识回答。"
 
         context = "\n以下是相关的知识库信息：\n"
         for i, doc in enumerate(knowledge_docs, 1):
-            context += f"{i}. {doc['content']}\n"
-        context += ("\n请基于以上信息回答用户问题。如果知识库信息不足以回答问题，"
+            context += f"[{i}] {doc['content']}\n"
+            source = self._source_label(doc)
+            if source:
+                context += f"    （来源：{source}）\n"
+        context += ("\n请基于以上信息回答用户问题，并在回答中标注所引用条目的编号（如[1][2]）。"
+                    "如果知识库信息不足以回答问题，"
                     "请按兜底话术引导用户致电门店或到店咨询，不要编造知识库中没有的信息。\n")
 
         return context
+
+    @staticmethod
+    def _source_label(doc: Dict[str, Any]) -> str:
+        """条目来源标注：PDF 分片带页码/章节，文本知识带分类"""
+        if doc.get("doc_type") == "pdf":
+            parts = ["文档资料"]
+            if doc.get("page_num"):
+                parts.append(f"第{doc['page_num']}页")
+            if doc.get("chapter_title"):
+                parts.append(doc["chapter_title"])
+            return "，".join(parts)
+        return doc.get("category") or ""

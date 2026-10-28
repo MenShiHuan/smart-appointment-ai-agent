@@ -1,31 +1,10 @@
 """
 业务服务层模块
 
-包含：
-- 知识库服务
-- 技师服务  
-- 预约服务
-- 用户行为服务
-- 推荐调度服务
-- 文本嵌入工具
+包含：知识库（Milvus 双向量混合检索）、向量库、PDF 入库编排（MinerU）、
+文本切分、技师、预约、用户行为、记忆整合、推荐调度、文本嵌入等。
+
+包根不做再导出：使用方一律按子模块路径导入
+（from services.knowledge_service import get_knowledge_service 等），
+避免包根急切导入连带加载 numpy/faiss/schedule 等重依赖。
 """
-
-from .text_embedding import (
-    embed_input,
-    find_best_match_indices,
-)
-from .knowledge_service import KnowledgeService
-from .technician_service import TechnicianService
-from .appointment_service import AppointmentService
-from .user_behavior_service import UserBehaviorService
-from .recommendation_service import RecommendationService
-
-__all__ = [
-    'embed_input',
-    'find_best_match_indices',
-    'KnowledgeService',
-    'TechnicianService',
-    'AppointmentService',
-    'UserBehaviorService',
-    'RecommendationService'
-]

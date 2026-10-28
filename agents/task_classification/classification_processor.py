@@ -49,6 +49,7 @@ class ClassificationProcessor:
         """
         try:
             # 检查是否需要进行分类
+            # 状态机处于分类态才走 LLM 分类；业务流进行中则按状态续流（免重复分类）
             if self.state_manager.should_classify():
                 # 进行任务分类
                 category = await self.task_classifier.classify_task(task)
@@ -75,6 +76,7 @@ class ClassificationProcessor:
         except Exception as e:
             # 处理异常情况
             yield f"[ERROR]处理任务时发生错误: {str(e)}"
+            # 异常兜底：强制重置状态机，避免会话卡在中间状态影响下一轮
             self.state_manager.force_reset()
 
     async def process_task_sync(self, task: str) -> str:

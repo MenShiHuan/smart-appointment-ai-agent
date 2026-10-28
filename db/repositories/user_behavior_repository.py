@@ -1,3 +1,8 @@
+"""
+用户行为数据访问对象
+
+行为流水、用户偏好、推荐消息与统计报表；行为流水是离线记忆整合的回放数据源。
+"""
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from ..base.interfaces import BaseUserBehaviorRepository
@@ -75,6 +80,7 @@ class UserBehaviorRepository(BaseUserBehaviorRepository):
                 cutoff_date = utcnow() - timedelta(days=days_back)
                 query = query.filter(UserBehavior.created_at >= cutoff_date)
             
+            # 最近优先（倒序），供行为历史展示
             behaviors = query.order_by(UserBehavior.created_at.desc()).all()
             
             return [self._behavior_to_dict(behavior) for behavior in behaviors]
@@ -189,6 +195,7 @@ class UserBehaviorRepository(BaseUserBehaviorRepository):
             if preference_type:
                 query = query.filter(UserPreference.preference_type == preference_type)
             
+            # 按置信度降序：高置信偏好优先展示
             preferences = query.order_by(UserPreference.confidence_score.desc()).all()
             
             return [self._preference_to_dict(preference) for preference in preferences]

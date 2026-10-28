@@ -37,7 +37,11 @@ class AppointmentDatabase:
     def save_appointment(self, technician_id: str, start_time: datetime, 
                         end_time: datetime, appointment_history: Dict[str, Any], 
                         session_id: str) -> bool:
-        """保存预约信息到数据库"""
+        """保存预约信息到数据库
+
+        成功后同步记录用户行为（埋点）；任何异常都兜底返回 False 而不上抛，
+        保证持久化失败不中断预约流程。
+        """
         try:
             # 通过Services层保存预约
             success = self.appointment_service.save_appointment(
@@ -58,7 +62,10 @@ class AppointmentDatabase:
     def _record_user_behavior(self, start_time: datetime, end_time: datetime,
                             technician_id: str, appointment_history: Dict[str, Any],
                             session_id: str):
-        """记录用户预约行为"""
+        """记录用户预约行为
+
+        记录失败仅打印日志、不影响预约成功结果（埋点属于旁路逻辑）。
+        """
         try:
             action_data = {
                 'start_time': time_config.format_datetime(start_time, "%Y-%m-%d %H:%M:%S"),

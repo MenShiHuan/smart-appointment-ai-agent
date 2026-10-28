@@ -1,3 +1,8 @@
+"""
+技师数据访问对象
+
+技师 CRUD、排班管理与可用性检查；save_appointment_if_available 在同一事务内防双订竞态。
+"""
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from ..base.interfaces import BaseTechnicianRepository, BaseScheduleRepository
@@ -190,6 +195,7 @@ class TechnicianRepository(BaseTechnicianRepository, BaseScheduleRepository):
             排班信息列表
         """
         with self.session_manager.session_scope() as session:
+            # 按自然日窗口过滤：当日 00:00 至次日 00:00（不含）
             start = datetime(date.year, date.month, date.day)
             end = start + timedelta(days=1)
             
@@ -221,6 +227,7 @@ class TechnicianRepository(BaseTechnicianRepository, BaseScheduleRepository):
                 TechnicianSchedule.end_time > start_time
             ).first()
 
+            # 与既有 busy 排班存在时间重叠即视为不可用（区间重叠判定）
             return conflict is None
 
     def save_appointment_if_available(self, technician_id: int, start_time: datetime,

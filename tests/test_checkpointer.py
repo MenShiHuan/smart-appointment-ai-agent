@@ -49,6 +49,7 @@ class StubTaskAgent:
 
 
 async def _scenario(tmp_path, category, sid):
+    """运行一轮图任务后模拟重启（同文件新 saver/新图），读取检查点快照"""
     db_url = f"sqlite:///{tmp_path}/g.db"
     ckpt_path = str(tmp_path / "checkpoints.db")
 
@@ -84,6 +85,7 @@ def test_checkpoint_persists_graph_state(tmp_path):
 
 
 async def _independent_threads_scenario(tmp_path):
+    """thread-a 运行后查询未运行过的 thread-b 检查点（应为空）"""
     db_url = f"sqlite:///{tmp_path}/g.db"
     ckpt_path = str(tmp_path / "checkpoints.db")
 

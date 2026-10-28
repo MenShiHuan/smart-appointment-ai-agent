@@ -8,7 +8,7 @@
 |---|---|---|
 | **意图分类**（主控） | 识别用户意图并路由到对应智能体 | LLM 四分类（预约/咨询/记忆/其它）+ 状态机 + 路由 |
 | **智能预约** | 预约流程编排 | 结构化槽位抽取（Pydantic + 修复重试）、理疗师匹配、档期冲突自愈、确认与禁忌筛查、天气提醒 |
-| **知识咨询** | 理疗知识问答 | 内置 SQLite + FAISS 知识库检索，流式生成回答 |
+| **知识咨询** | 理疗知识问答 | Milvus 双向量混合检索（BM25 稀疏 + DashScope 稠密 + gte-rerank-v2 精排），流式生成带引用回答 |
 | **长记忆偏好总结** | 用户画像与记忆 | 行为记录、离线偏好整合（置信度更新）、历史偏好查询回答、疗程回访提醒 |
 
 ## 编排设计（LangGraph）
@@ -43,12 +43,12 @@ graph TD
 - **档期冲突自愈**：指定理疗师不可用时，先基于专长 Embedding 相似度推荐替代候选人，或由 LLM 重规划时间，循环有界、熔断兜底。
 - **确认与禁忌筛查**：落库前输出预约摘要等用户确认；禁忌症（高血压/孕期/皮肤破损）命中即转人工评估、不自动落库。
 - **理疗师匹配**：性别、手法偏好过滤 + 专长相似度排序 + 档期可用性检查。
-- **RAG 知识咨询**：SQLite 存知识 + 内存 FAISS 索引检索，知识库增删改查自动维护索引，回答真流式输出；检索层接口抽象，可与外部知识服务对接。
+- **RAG 知识咨询**：Milvus 双向量混合检索（BM25 稀疏 Function + DashScope text-embedding-v3 稠密 Function）→ RRF 融合 → gte-rerank-v2 语义精排 → DeepSeek 生成（回答带引用页码/章节）；PDF 上传经 MinerU 解析 + 结构感知/递归字符/滑动窗口切分自动入库；知识库增删改查实时生效；回答真流式输出。
 - **长记忆偏好画像**：行为记录（预约/咨询）+ 后台整合任务（水位游标增量回放 → 结构化抽取 → 向量去重 → "频次×新近度"置信度更新，幂等可重试）；用户可查询自己的历史偏好（"我上次约的哪位理疗师"）。
 - **疗程回访**：结合偏好画像与理疗师空闲档期生成个性化回访消息（定时调度）。
 - **天气提醒**：预约成功后结合 Open-Meteo 实时天气（免费地理编码 + 天气 API，无需密钥）生成理疗后保暖提醒；天气服务不可用时优雅降级。
 - **领域词表配置**：`config/domain_terms.py` 集中管理领域词表（禁忌症、业务称谓、服务项目目录），提示词与消息文案统一引用，避免各处硬编码措辞不一致。
-- **模型混合部署**：对话与抽取用云端 DeepSeek（deepseek-chat），向量化用本地 Ollama + bge-m3（零成本、中文语义强）。
+- **模型混合部署**：对话与抽取用云端 DeepSeek（deepseek-chat）；全链路向量化统一走 DashScope text-embedding-v3（知识 RAG 由 Milvus 服务端 Function 调用，记忆/技师由应用侧直连），精排用 gte-rerank-v2。
 - **评测流水线**：`evals/` 黄金评测集（意图分类 50 / 槽位抽取 30 / 咨询问答 40 / 端到端 10，含时间归一化、禁忌命中、档期冲突用例），一键产出报告，失败样本回灌回归。
 - **可观测性**：轻量 TraceContext 记录各阶段耗时与 Token 到 JSON Lines，`/metrics` 端点聚合。
 
@@ -56,7 +56,7 @@ graph TD
 
 ```text
 Web & Application Layer
-    ↓  app.py, web/：页面、路由入口、系统启动
+    ↓  app.py, application/, web/：应用组装根、页面、路由入口、系统启动
 API Layer
     ↓  api/：外部接口、请求编排、响应封装
 Agents Layer
@@ -73,10 +73,11 @@ DB Layer
 
 - **编排框架**：LangGraph（图状态机 + SQLite Checkpointer）
 - **LLM**：DeepSeek（OpenAI 兼容协议，工厂模式支持多 Provider 切换）
-- **Embedding**：Ollama + bge-m3（本地部署，1024 维）
+- **Embedding**：全链路统一 DashScope text-embedding-v3（1024 维）——知识 RAG 由 Milvus 服务端调用，记忆/技师由应用侧直连
 - **后端框架**：FastAPI、Uvicorn
 - **数据库**：SQLite、SQLAlchemy（Repository 模式）
-- **向量检索**：FAISS（内存索引，DB 级向量缓存）
+- **向量检索**：Milvus 2.6（BM25 稀疏 + 稠密双向量，RRF 融合 + gte-rerank-v2 精排）
+- **文档解析**：MinerU 云 OpenAPI v4（mineru.net，Bearer 鉴权，本地不部署；精准解析模式）
 - **天气服务**：Open-Meteo（免费地理编码 + 天气 API，免密钥）
 - **测试**：pytest（全离线，FakeLLM/FakeEmbedding，无需 API Key 与网络）
 
@@ -86,7 +87,7 @@ DB Layer
 
 ```bash
 uv venv --python 3.11
-uv pip install -r requirements.txt -r requirements-dev.txt
+uv pip install -r requirements.txt
 ```
 
 ### 2. 配置环境变量
@@ -103,17 +104,31 @@ LLM_API_KEY=your_deepseek_api_key_here
 LLM_BASE_URL=https://api.deepseek.com
 LLM_MODEL=deepseek-chat
 
-EMBEDDING_PROVIDER=ollama
-EMBEDDING_BASE_URL=http://localhost:11434/v1
-EMBEDDING_MODEL=bge-m3
+# Milvus 向量库（BM25 稀疏 + DashScope 稠密 + 精排，由 Milvus 服务端调用云 API）
+MILVUS_URI=http://localhost:19530
+# DashScope 凭证：DASHSCOPE_API_KEY=text-embedding-v3 向量化；DASHSCOPE_RERANK_API_KEY=gte-rerank-v2 精排
+# （Milvus 容器侧需配置同名环境变量，勿加 MILVUSAI 前缀；应用侧兜底直连也读这两个）
+DASHSCOPE_API_KEY=your_dashscope_embed_api_key_here
+DASHSCOPE_RERANK_API_KEY=your_dashscope_rerank_api_key_here
+RERANK_BACKEND=milvus
+# MinerU 云文档解析服务（官方 OpenAPI v4，本地不部署）
+MINERU_BASE_URL=https://mineru.net/api/v4
+MINERU_TOKEN=your_mineru_api_token_here
+# 解析模式：vlm=精准解析（默认）/ pipeline=普通
+MINERU_MODEL_VERSION=vlm
 
 DATABASE_URL=sqlite:///./data/smart_appointment.db
 ```
 
-### 3. 拉取本地 Embedding 模型
+> 知识 RAG 的编码与精排由 Milvus 服务端 Function 出网调用 DashScope 云 API；
+> 凭证为 Milvus 容器侧同名环境变量 `DASHSCOPE_API_KEY`（嵌入）与
+> `DASHSCOPE_RERANK_API_KEY`（精排），**勿加 MILVUSAI 前缀**。
+> 应用侧 `.env` 中同样的两个键用于：记忆/技师向量化、精排兜底直连与检索兜底编码。
+
+### 3. 启动 Milvus（知识 RAG 向量库）
 
 ```bash
-ollama pull bge-m3
+docker compose up -d etcd minio milvus   # Milvus 2.6 standalone（首次自动建集合与索引）
 ```
 
 ### 4. 启动服务
@@ -123,6 +138,7 @@ python -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 访问：Web 页面 http://127.0.0.1:8000 、API 文档 http://127.0.0.1:8000/docs
+（知识库管理页含 PDF 上传入库：MinerU 解析 → 结构感知切分 → Milvus 双向量入库）
 
 ## 测试与评测
 
@@ -130,7 +146,7 @@ python -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
 # 离线测试（无需 API Key、不联网）
 python -m pytest tests/
 
-# 评测流水线（需要 DeepSeek Key 与 Ollama bge-m3；自动使用独立评测库，不碰生产数据）
+# 评测流水线（需要 DeepSeek Key、DashScope 凭证与 Milvus 服务；自动使用独立评测库，不碰生产数据）
 python -m evals.run --subset intent,slots,qa,e2e
 python -m evals.run --subset qa --limit 5     # 抽样小跑
 EVAL_KEEP_DB=1 python -m evals.run            # 保留评测库（默认每次重建）
@@ -155,7 +171,7 @@ EVAL_KEEP_DB=1 python -m evals.run            # 保留评测库（默认每次�
 ## Docker 部署（F2）
 
 ```bash
-docker compose up --build   # Embedding 走宿主机 Ollama（bge-m3），LLM 走 DeepSeek
+docker compose up --build   # 含 Milvus（BM25+DashScope 双向量）；LLM 走 DeepSeek；向量化统一走 DashScope 云 API
 ```
 
 ## 项目结构
@@ -173,17 +189,17 @@ smart-appointment-ai-agent-master/
 │   ├── consultant_agent.py
 │   ├── user_behavior/              # 行为记录、偏好管理、模式分析
 │   └── user_behavior_agent.py
+├── application/                    # 应用组装根（Agent 单例、图生命周期、会话恢复、流式管线）
 ├── api/                            # API 编排层（含流式聊天入口）
-├── services/                       # 业务逻辑层（知识库/技师/用户行为/会话/记忆整合/向量）
+├── services/                       # 业务逻辑层（知识库/向量库/ETL/切分/技师/用户行为/会话/记忆整合）
 ├── db/                             # 数据持久化层（模型/Repository/路由）
-├── config/                         # 配置（模型工厂/领域词表/常量/时间）
+├── config/                         # 配置（模型工厂/向量检索/领域词表/常量/时间）
 ├── web/                            # Web 页面层
 ├── evals/                          # 评测流水线与黄金评测集
 ├── docs/                           # 架构图（LangGraph Mermaid）
 ├── tests/                          # 离线测试
 ├── app.py                          # 应用入口
-├── requirements.txt                # 运行时依赖
-└── requirements-dev.txt            # 开发依赖
+└── requirements.txt                # 依赖（唯一依赖文件，含测试）
 ```
 
 ## 后续规划

@@ -31,6 +31,7 @@ def make_processor(emit_confirm_signal=False):
 # ============ 状态机单元测试 ============
 
 def test_contraindication_reply_sets_hit_and_completes():
+    """禁忌命中：记录禁忌词并标记流程完成"""
     processor = make_processor()
     history = {"awaiting_booking_confirmation": True, "pending_technician": {"name": "张伟"}}
 
@@ -44,6 +45,7 @@ def test_contraindication_reply_sets_hit_and_completes():
 
 
 def test_positive_reply_confirms_booking():
+    """肯定回复：booking_confirmed 置 True，流程完成"""
     processor = make_processor()
     history = {"awaiting_booking_confirmation": True, "pending_technician": {"name": "张伟"}}
 
@@ -56,6 +58,7 @@ def test_positive_reply_confirms_booking():
 
 
 def test_negative_reply_cancels_booking():
+    """否定回复：booking_cancelled 置 True，流程完成"""
     processor = make_processor()
     history = {"awaiting_booking_confirmation": True, "pending_technician": {"name": "张伟"}}
 
@@ -68,6 +71,7 @@ def test_negative_reply_cancels_booking():
 
 
 def test_unclear_reply_keeps_waiting():
+    """模糊回复：保持等待确认，流程不完成"""
     processor = make_processor()
     history = {"awaiting_booking_confirmation": True, "pending_technician": {"name": "张伟"}}
 
@@ -90,6 +94,7 @@ async def _collect_async(agen):
 
 
 def test_complete_appointment_emits_confirm_signal_in_graph_mode():
+    """图模式 + 禁忌命中：完成流程只发出 manual_review 信号"""
     processor = make_processor(emit_confirm_signal=True)
     history = {"contraindication_hit": ["孕期"]}
 
@@ -99,6 +104,7 @@ def test_complete_appointment_emits_confirm_signal_in_graph_mode():
 
 
 def test_complete_appointment_cancelled_yields_cancel_message():
+    """已取消：输出取消话术并清理 pending_technician"""
     processor = make_processor()
     history = {"booking_cancelled": True, "pending_technician": {"name": "张伟"}}
 
@@ -109,6 +115,7 @@ def test_complete_appointment_cancelled_yields_cancel_message():
 
 
 def test_complete_appointment_confirmed_saves_with_pending_tech():
+    """已确认：经假落库保存 pending 技师，输出预约成功话术"""
     processor = make_processor()
     saved = {}
 
@@ -246,6 +253,7 @@ def test_manual_review_routes_to_node_and_resets_session(tmp_path):
 
 
 def test_confirmation_message_and_referral_message_content():
+    """话术文案：确认摘要含技师/项目/时间，禁忌转介含禁忌词"""
     builder = MessageBuilder()
     history = {"project": "肩颈理疗", "start_time": "2026-09-23 15:00", "duration": "60分钟"}
     msg = builder.create_booking_confirmation_message({"name": "张伟"}, history)

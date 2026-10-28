@@ -64,6 +64,7 @@ class PreferenceManager:
             start_datetime = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
             hour = start_datetime.hour
             
+            # 时段边界与 MemoryExtractor 的 _time_period_from_start_time 保持一致
             if 6 <= hour < 12:
                 time_period = '上午'
             elif 12 <= hour < 18:
@@ -228,6 +229,7 @@ class PreferenceManager:
     def clear_all_preferences(self):
         """清除所有偏好"""
         try:
+            # 五类偏好维度与 MemoryEntry.entry_type 对齐，全量清空
             preference_types = ['technician', 'time_period', 'duration', 'service', 'technician_type']
             for pref_type in preference_types:
                 self.clear_preference(pref_type)

@@ -126,7 +126,11 @@ class WeatherTool(BaseTool):
             return FALLBACK_MESSAGE
 
     def _run(self, city: str = "") -> str:
-        """同步版本 - 不推荐使用"""
+        """同步版本 - 不推荐使用
+
+        内部用 asyncio.run 包装异步实现，在已有事件循环中调用会报错；
+        业务链路请使用 _arun。
+        """
         return asyncio.run(self._get_weather_data(city))
 
     async def _arun(self, city: str = "") -> str:

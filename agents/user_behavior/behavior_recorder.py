@@ -58,8 +58,10 @@ class BehaviorRecorder:
                     action_type=action_type,
                     action_data=action_data,
                     technician_id=str(technician_id) if technician_id else None,
+                    # 无会话上下文时落默认会话，保证行为记录不落空
                     session_id=session_id or "default_session"
                 )
+                # Service 层只返回成功标志（无真实记录ID），约定返回 1 表示成功
                 return 1 if success else None
             else:
                 # 向后兼容：直接使用数据库
@@ -126,6 +128,7 @@ class BehaviorRecorder:
         Returns:
             List[Dict]: 行为记录列表
         """
+        # 默认窗口 30 天与 PatternAnalyzer 的回访提醒阈值（30 天）同口径
         try:
             return self.behavior_db.get_user_behaviors(
                 action_type=action_type,
@@ -167,6 +170,7 @@ class BehaviorRecorder:
         
         # 根据不同行为类型进行验证
         if action_type == 'appointment':
+            # 预约行为必填校验：开始时间与时长是预约记录的核心字段
             required_fields = ['start_time', 'duration']
             return all(field in action_data for field in required_fields)
         elif action_type == 'consultation':

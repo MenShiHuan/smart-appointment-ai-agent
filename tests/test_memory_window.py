@@ -84,6 +84,7 @@ def _seed_entry(service, content, entry_type="service", importance=1.0,
 # ============ 1. 加权召回排序 ============
 
 def test_recall_scores_by_three_factors(recall_service):
+    """加权召回：语义/时效/重要度三因子综合排序（语义命中且新鲜者居首）"""
     emb = DictEmbedding(EMBEDDING_TEXTS)
     # A：语义命中但 10 天前；B：语义无关但新鲜；C：语义命中、新鲜但重要度低
     _seed_entry(recall_service, "肩颈理疗", embedding=emb("肩颈理疗"), days_old=10)
@@ -105,6 +106,7 @@ def test_recall_scores_by_three_factors(recall_service):
 
 
 def test_recall_top_k_and_excludes_retired(recall_service):
+    """召回 Top-K 截断，且排除 retired 条目"""
     emb = DictEmbedding(EMBEDDING_TEXTS)
     _seed_entry(recall_service, "肩颈理疗", embedding=emb("肩颈理疗"))
     _seed_entry(recall_service, "足部理疗", embedding=emb("足部理疗"))
@@ -120,6 +122,7 @@ def test_recall_top_k_and_excludes_retired(recall_service):
 # ============ 3/4/5. 窗口压缩与滚动摘要 ============
 
 def _messages(count):
+    """生成 count 条用户/助手交替消息"""
     out = []
     for i in range(count):
         out.append(HumanMessage(content=f"用户消息{i}"))
@@ -128,6 +131,7 @@ def _messages(count):
 
 
 def test_window_compress_threshold_and_split():
+    """窗口压缩：消息数达 60% 阈值触发，切分为待压缩与保留两段"""
     window = MessageWindowManager(message_limit=20, trigger_ratio=0.6, keep_after_summary=8)
 
     assert window.should_compress(_messages(11)) is False
@@ -140,6 +144,7 @@ def test_window_compress_threshold_and_split():
 
 
 def test_summarize_rolls_up_existing_summary():
+    """滚动摘要：已有摘要并入压缩提示词，输出新摘要"""
     window = MessageWindowManager()
     fake_llm = FakeLLM(["用户想预约肩颈理疗，偏好下午时段。"])
 
@@ -154,6 +159,7 @@ def test_summarize_rolls_up_existing_summary():
 
 
 def test_windowed_history_str_keeps_summary_and_recent_only():
+    """窗口化历史文本：摘要前缀 + 最近 N 条，更早消息被替代"""
     msgs = _messages(12)
     text = windowed_history_str(msgs, summary="早前聊过理疗项目价格", recent_count=8)
 
@@ -166,6 +172,7 @@ def test_windowed_history_str_keeps_summary_and_recent_only():
 # ============ 6/7. 预约流程窗口集成 ============
 
 def test_input_parser_uses_history_text_override():
+    """抽取提示词使用窗口化历史文本，窗口外历史不进入"""
     class CapturingStructuredLLM:
         def with_structured_output(self, schema, method=None):
             return self

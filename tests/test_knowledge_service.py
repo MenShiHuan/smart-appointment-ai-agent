@@ -42,6 +42,7 @@ def fake_embedding(monkeypatch):
 
 
 def test_singleton_returns_same_instance(tmp_path, monkeypatch):
+    """进程级单例：多次获取返回同一实例（结束后还原全局实例状态）"""
     monkeypatch.setattr("services.knowledge_service._instance", None)
     try:
         svc1 = get_knowledge_service(db_path=f"sqlite:///{tmp_path}/k.db")

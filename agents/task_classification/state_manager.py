@@ -26,6 +26,7 @@ class StateManager:
     
     def get_current_state(self) -> StateEnum:
         """获取当前状态"""
+        # 未初始化（None）视为分类态：状态机入口默认等待意图识别
         return self.state.value or StateEnum.CLASSIFY
     
     def set_state(self, new_state: StateEnum) -> None:
@@ -41,6 +42,7 @@ class StateManager:
     def should_classify(self) -> bool:
         """判断是否应该进行任务分类"""
         current_state = self.get_current_state()
+        # 仅分类态需要重新识别意图；业务流进行中按状态续流
         return current_state == StateEnum.CLASSIFY or current_state is None
     
     def is_in_appointment_flow(self) -> bool:

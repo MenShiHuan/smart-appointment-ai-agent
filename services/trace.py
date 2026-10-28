@@ -37,6 +37,7 @@ class MetricsRegistry:
         self._stage_elapsed: Dict[str, List[float]] = {}
 
     def record(self, stage: str, elapsed: float, is_error: bool = False) -> None:
+        """记录一次阶段执行：请求计数 +1，错误计入错误计数，耗时按阶段聚合"""
         with self._lock:
             self.request_count += 1
             if is_error:
@@ -44,6 +45,7 @@ class MetricsRegistry:
             self._stage_elapsed.setdefault(stage, []).append(elapsed)
 
     def snapshot(self) -> dict:
+        """返回指标快照：请求/错误计数与各阶段耗时统计（次数、总耗时、均值、最大值）"""
         with self._lock:
             stages = {}
             for stage, values in self._stage_elapsed.items():

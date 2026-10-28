@@ -1,3 +1,8 @@
+"""
+数据访问抽象接口
+
+定义技师/排班/知识库/用户行为四类仓储的方法契约，实现类与兼容路由器统一遵循。
+"""
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
 from datetime import datetime
@@ -114,6 +119,7 @@ class BaseKnowledgeRepository(ABC):
         """更新文档"""
         pass
     
+    # 默认软删除：仅置 is_active=0，保留内容便于恢复与审计
     @abstractmethod
     def delete_document(self, doc_id: int, soft_delete: bool = True) -> bool:
         """删除文档（支持软删除）"""
@@ -185,6 +191,7 @@ class BaseUserBehaviorRepository(ABC):
         """标记推荐为已发送"""
         pass
 
+    # 统计窗口默认近 30 天
     @abstractmethod
     def get_user_statistics(self, user_id: str, days_back: int = 30) -> Dict[str, Any]:
         """获取用户统计信息"""

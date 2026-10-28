@@ -3,17 +3,7 @@
 
 所有触发阈值与权重集中在此，便于调参；设计口径见 DEV_SPEC 2.6 / 2.6.1。
 """
-import os
-
-
-def _env_int(name: str, default: int) -> int:
-    value = os.getenv(name)
-    return int(value) if value else default
-
-
-def _env_float(name: str, default: float) -> float:
-    value = os.getenv(name)
-    return float(value) if value else default
+from config.env import _env_int, _env_float
 
 
 # 触发条件
